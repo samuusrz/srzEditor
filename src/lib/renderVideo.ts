@@ -12,8 +12,14 @@ export async function renderVideoInBrowser(
 ): Promise<Blob> {
   onProgress({ step: 'Cargando FFmpeg…', pct: 0 })
 
+  if (typeof SharedArrayBuffer === 'undefined') {
+    throw new Error(
+      'SharedArrayBuffer no disponible. Asegúrate de que el sitio tiene los headers COOP/COEP (vercel.json configurado).',
+    )
+  }
+
   const ffmpeg = new FFmpeg()
-  const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm'
+  const baseURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm'
   await ffmpeg.load({
     coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
     wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),

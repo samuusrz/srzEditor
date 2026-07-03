@@ -31,7 +31,8 @@ export function ExportModal({ clips, texts, audio, onClose }: Props) {
       setVideoUrl(URL.createObjectURL(blob))
       setStatus('done')
     } catch (e: any) {
-      setError(e.message ?? 'Error desconocido')
+      const msg = e instanceof Error ? e.message : (typeof e === 'string' ? e : JSON.stringify(e))
+      setError(msg || 'Error desconocido')
       setStatus('error')
     }
   }
