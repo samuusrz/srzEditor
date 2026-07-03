@@ -103,5 +103,6 @@ export async function renderVideoInBrowser(
 
   onProgress({ step: 'Finalizando…', pct: 97 })
   const data = await ffmpeg.readFile('output.mp4')
-  return new Blob([data], { type: 'video/mp4' })
+  // FFmpeg returns Uint8Array<ArrayBufferLike>; cast needed for Blob constructor
+  return new Blob([data as unknown as ArrayBuffer], { type: 'video/mp4' })
 }
