@@ -1,24 +1,18 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg'
 import { fetchFile, toBlobURL } from '@ffmpeg/util'
-import type { TemplateWithSlots, ProjectClip, ProjectText, SongLibraryItem } from '../types'
-import { getPublicUrl } from './db'
+import type { Clip, TextOverlay, AudioTrack } from '../types/editor'
 
-export type RenderProgress = {
-  step: string
-  pct: number
-}
+export type RenderProgress = { step: string; pct: number }
 
 export async function renderVideoInBrowser(
-  template: TemplateWithSlots,
-  clips: ProjectClip[],
-  texts: ProjectText[],
-  audio: { song: SongLibraryItem; startAt: number } | null,
+  clips: Clip[],
+  texts: TextOverlay[],
+  audio: AudioTrack | null,
   onProgress: (p: RenderProgress) => void,
 ): Promise<Blob> {
   onProgress({ step: 'Cargando FFmpeg…', pct: 0 })
 
   const ffmpeg = new FFmpeg()
-
   const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm'
   await ffmpeg.load({
     coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
@@ -26,88 +20,74 @@ export async function renderVideoInBrowser(
   })
 
   ffmpeg.on('progress', ({ progress }) => {
-    onProgress({ step: 'Renderizando…', pct: Math.round(progress * 100) })
+    onProgress({ step: 'Codificando…', pct: 30 + Math.round(progress * 65) })
   })
 
-  // 1. Write clips to FFmpeg FS
+  // 1. Write clip files
   onProgress({ step: 'Cargando clips…', pct: 5 })
-  const clipNames: string[] = []
+  const names: string[] = []
   for (let i = 0; i < clips.length; i++) {
-    const clip = clips[i]
     const name = `clip${i}.mp4`
-    if (clip.file) {
-      await ffmpeg.writeFile(name, await fetchFile(clip.file))
-    } else {
-      const url = getPublicUrl(clip.storage_path)
-      await ffmpeg.writeFile(name, await fetchFile(url))
-    }
-    clipNames.push(name)
+    await ffmpeg.writeFile(name, await fetchFile(clips[i].file))
+    names.push(name)
     onProgress({ step: `Cargando clip ${i + 1}/${clips.length}…`, pct: 5 + Math.round((i + 1) / clips.length * 20) })
   }
 
-  // 2. Build drawtext filters for text overlays
-  const drawtextFilters = texts
-    .filter(t => t.final_text.trim())
-    .map(t => {
-      const slot = template.text_slots.find(s => s.id === t.text_slot_id)
-      const x = t.position_override_x ?? slot?.position_x ?? 50
-      const y = t.position_override_y ?? slot?.position_y ?? 10
-      const startAt = slot?.start_at ?? 0
-      const endAt = slot?.end_at ?? (startAt + 3)
-      // x/y are percentages of the canvas (1080x1920)
-      const px = Math.round((x / 100) * 1080)
-      const py = Math.round((y / 100) * 1920)
-      const safe = t.final_text.replace(/'/g, "\\'").replace(/:/g, '\\:')
-      return `drawtext=text='${safe}':x=${px}:y=${py}:fontsize=64:fontcolor=white:bordercolor=black:borderw=4:enable='between(t,${startAt},${endAt})'`
-    })
-
-  // 3. Build concat filter + optional audio mix
-  onProgress({ step: 'Preparando filtros…', pct: 26 })
-
-  let audioFile: string | null = null
+  // 2. Audio file
+  let audioName: string | null = null
   if (audio) {
-    const url = getPublicUrl(audio.song.storage_path)
-    audioFile = 'audio.mp3'
-    await ffmpeg.writeFile(audioFile, await fetchFile(url))
+    audioName = 'audio_input'
+    await ffmpeg.writeFile(audioName, await fetchFile(audio.file))
   }
 
-  const inputs: string[] = [...clipNames.map(n => ['-i', n]).flat()]
-  if (audioFile) inputs.push('-i', audioFile)
+  onProgress({ step: 'Preparando filtros…', pct: 26 })
 
-  const n = clipNames.length
-  const concatFilter = `${clipNames.map((_, i) => `[${i}:v][${i}:a]`).join('')}concat=n=${n}:v=1:a=1[cv][ca]`
+  // 3. Build filter_complex
+  const n = names.length
+  const concatFilter = `${names.map((_, i) => `[${i}:v][${i}:a]`).join('')}concat=n=${n}:v=1:a=1[cv][ca]`
+
+  const drawtextFilters = texts
+    .filter(t => t.content.trim())
+    .map(t => {
+      // x/y are % of 1080x1920
+      const px   = Math.round((t.x / 100) * 1080)
+      const py   = Math.round((t.y / 100) * 1920)
+      const safe = t.content.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/:/g, '\\:')
+      const style = t.bold ? ':fontstyle=Bold' : ''
+      return `drawtext=text='${safe}':x=${px}:y=${py}:fontsize=${t.fontSize}:fontcolor=${t.color.replace('#', '0x')}:bordercolor=0x000000:borderw=4${style}:enable='between(t,${t.startAt},${t.startAt + t.duration})'`
+    })
+
+  const audioIdx = n   // input index for audio file (after video clips)
 
   let filterComplex: string
   let outputMap: string[]
 
-  if (audioFile && drawtextFilters.length > 0) {
-    const audioIdx = n
+  const hasText  = drawtextFilters.length > 0
+  const hasAudio = audioName !== null
+
+  if (hasText && hasAudio) {
     filterComplex = [
       concatFilter,
       `[cv]${drawtextFilters.join(',')}[vout]`,
       `[ca][${audioIdx}:a]amix=inputs=2:duration=first[aout]`,
     ].join(';')
     outputMap = ['-map', '[vout]', '-map', '[aout]']
-  } else if (audioFile) {
-    const audioIdx = n
-    filterComplex = [
-      concatFilter,
-      `[ca][${audioIdx}:a]amix=inputs=2:duration=first[aout]`,
-    ].join(';')
-    outputMap = ['-map', '[cv]', '-map', '[aout]']
-  } else if (drawtextFilters.length > 0) {
-    filterComplex = [
-      concatFilter,
-      `[cv]${drawtextFilters.join(',')}[vout]`,
-    ].join(';')
+  } else if (hasText) {
+    filterComplex = [concatFilter, `[cv]${drawtextFilters.join(',')}[vout]`].join(';')
     outputMap = ['-map', '[vout]', '-map', '[ca]']
+  } else if (hasAudio) {
+    filterComplex = [concatFilter, `[ca][${audioIdx}:a]amix=inputs=2:duration=first[aout]`].join(';')
+    outputMap = ['-map', '[cv]', '-map', '[aout]']
   } else {
     filterComplex = concatFilter
     outputMap = ['-map', '[cv]', '-map', '[ca]']
   }
 
+  const inputs: string[] = names.flatMap(n => ['-i', n])
+  if (audioName) inputs.push('-i', audioName)
+
   // 4. Run FFmpeg
-  onProgress({ step: 'Renderizando vídeo…', pct: 30 })
+  onProgress({ step: 'Renderizando…', pct: 30 })
   await ffmpeg.exec([
     ...inputs,
     '-filter_complex', filterComplex,
@@ -121,8 +101,7 @@ export async function renderVideoInBrowser(
     'output.mp4',
   ])
 
-  // 5. Read output
-  onProgress({ step: 'Finalizando…', pct: 95 })
+  onProgress({ step: 'Finalizando…', pct: 97 })
   const data = await ffmpeg.readFile('output.mp4')
   return new Blob([data], { type: 'video/mp4' })
 }

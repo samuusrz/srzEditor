@@ -12,14 +12,18 @@ type Page = 'dashboard' | 'templates' | 'editor' | 'texts' | 'songs' | 'history'
 export default function App() {
   const [page, setPage] = useState<Page>('dashboard')
 
+  // Editor is full-screen (no sidebar)
+  if (page === 'editor') {
+    return <EditorPage onBack={() => setPage('dashboard')} />
+  }
+
   const content = {
     dashboard: <DashboardPage onNavigate={setPage} />,
     templates: <TemplatesPage />,
-    editor: <EditorPage />,
     texts: <TextsPage />,
     songs: <SongsPage />,
     history: <HistoryPage />,
-  }[page]
+  }[page as Exclude<Page, 'editor'>]
 
   return (
     <div className="flex h-screen overflow-hidden">

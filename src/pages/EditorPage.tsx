@@ -1,131 +1,129 @@
 import { useState } from 'react'
-import { ChevronRight, Upload, Check, Film, Type, Music, Eye } from 'lucide-react'
-import { TemplatePicker } from '../components/editor/TemplatePicker'
-import { ClipsStep } from '../components/editor/ClipsStep'
-import { TextsStep } from '../components/editor/TextsStep'
-import { AudioStep } from '../components/editor/AudioStep'
-import { PreviewExportStep } from '../components/editor/PreviewExportStep'
-import type { TemplateWithSlots, ProjectClip, ProjectText, SongLibraryItem } from '../types'
+import { ArrowLeft, Download } from 'lucide-react'
+import { useEditor } from '../hooks/useEditor'
+import { MediaPanel }      from '../components/editor/MediaPanel'
+import { PreviewPanel }    from '../components/editor/PreviewPanel'
+import { PropertiesPanel } from '../components/editor/PropertiesPanel'
+import { Timeline }        from '../components/editor/Timeline'
+import { ExportModal }     from '../components/editor/ExportModal'
+import type { AudioTrack } from '../types/editor'
 
-type Step = 'template' | 'clips' | 'texts' | 'audio' | 'export'
+interface Props {
+  onBack: () => void
+}
 
-const STEPS: { id: Step; label: string; icon: React.ReactNode }[] = [
-  { id: 'template', label: 'Plantilla', icon: <Film size={14} /> },
-  { id: 'clips', label: 'Clips', icon: <Upload size={14} /> },
-  { id: 'texts', label: 'Textos', icon: <Type size={14} /> },
-  { id: 'audio', label: 'Música', icon: <Music size={14} /> },
-  { id: 'export', label: 'Exportar', icon: <Eye size={14} /> },
-]
+export function EditorPage({ onBack }: Props) {
+  const [showExport, setShowExport] = useState(false)
+  const {
+    state, totalDuration,
+    addClip, removeClip, moveClip, packClips,
+    addText, updateText, removeText,
+    setAudio, removeAudio,
+    setPlayhead, setPlaying,
+    setZoom, select,
+  } = useEditor()
 
-export function EditorPage() {
-  const [step, setStep] = useState<Step>('template')
-  const [template, setTemplate] = useState<TemplateWithSlots | null>(null)
-  const [clips, setClips] = useState<ProjectClip[]>([])
-  const [texts, setTexts] = useState<ProjectText[]>([])
-  const [audio, setAudio] = useState<{ song: SongLibraryItem; startAt: number } | null>(null)
+  const { clips, texts, audio, playhead, playing, zoom, selected } = state
 
-  const currentIdx = STEPS.findIndex(s => s.id === step)
-
-  const canGoToStep = (id: Step) => {
-    const idx = STEPS.findIndex(s => s.id === id)
-    if (idx === 0) return true
-    if (idx >= 1 && !template) return false
-    return true
-  }
-
-  const resetProject = () => {
-    setTemplate(null)
-    setClips([])
-    setTexts([])
-    setAudio(null)
-    setStep('template')
+  const updateAudio = (patch: Partial<AudioTrack>) => {
+    if (!audio) return
+    setAudio({ ...audio, ...patch })
   }
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Step nav */}
-      <div className="border-b border-zinc-800 px-8 py-0">
-        <div className="flex items-center gap-0">
-          {STEPS.map((s, i) => {
-            const active = s.id === step
-            const done = currentIdx > i
-            const accessible = canGoToStep(s.id)
-            return (
-              <button
-                key={s.id}
-                onClick={() => accessible && setStep(s.id)}
-                disabled={!accessible}
-                className={`
-                  flex items-center gap-2 px-4 py-4 text-sm border-b-2 transition-colors cursor-pointer
-                  disabled:cursor-not-allowed
-                  ${active
-                    ? 'border-violet-500 text-violet-400'
-                    : done
-                    ? 'border-transparent text-zinc-400 hover:text-zinc-200'
-                    : 'border-transparent text-zinc-600 hover:text-zinc-400'
-                  }
-                `}
-              >
-                {done && !active ? <Check size={13} className="text-green-400" /> : s.icon}
-                {s.label}
-                {i < STEPS.length - 1 && (
-                  <ChevronRight size={12} className="text-zinc-700 ml-1" />
-                )}
-              </button>
-            )
-          })}
+    <div className="h-screen flex flex-col bg-zinc-950 overflow-hidden">
+      {/* ── Top bar ────────────────────────────────────────────────────────── */}
+      <header className="h-12 flex-none flex items-center justify-between px-4 border-b border-zinc-800 bg-zinc-950">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onBack}
+            className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-100 transition-colors cursor-pointer"
+          >
+            <ArrowLeft size={15} />
+            Salir
+          </button>
+          <span className="text-zinc-700">|</span>
+          <span className="text-sm font-semibold text-zinc-200">SRZ Editor</span>
         </div>
+
+        <button
+          onClick={() => setShowExport(true)}
+          disabled={clips.length === 0}
+          className="flex items-center gap-2 px-4 py-1.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white text-sm font-medium rounded-lg transition-colors cursor-pointer"
+        >
+          <Download size={13} />
+          Exportar
+        </button>
+      </header>
+
+      {/* ── Main area ──────────────────────────────────────────────────────── */}
+      <div className="flex-1 flex min-h-0 overflow-hidden">
+        {/* Left: media & tools */}
+        <MediaPanel
+          clips={clips}
+          texts={texts}
+          audio={audio}
+          totalDuration={totalDuration}
+          onAddClip={addClip}
+          onRemoveClip={removeClip}
+          onAddText={addText}
+          onSetAudio={setAudio}
+          onRemoveAudio={removeAudio}
+        />
+
+        {/* Center: video preview */}
+        <PreviewPanel
+          clips={clips}
+          texts={texts}
+          playhead={playhead}
+          playing={playing}
+          totalDuration={totalDuration}
+          onSetPlayhead={setPlayhead}
+          onSetPlaying={setPlaying}
+        />
+
+        {/* Right: properties */}
+        <PropertiesPanel
+          selected={selected}
+          clips={clips}
+          texts={texts}
+          audio={audio}
+          totalDuration={totalDuration}
+          onUpdateText={updateText}
+          onRemoveText={removeText}
+          onUpdateAudio={updateAudio}
+          onRemoveAudio={removeAudio}
+          onRemoveClip={removeClip}
+        />
       </div>
 
-      {/* Step content */}
-      <div className="flex-1 overflow-auto p-8">
-        {step === 'template' && (
-          <TemplatePicker
-            selected={template}
-            onSelect={t => { setTemplate(t); setClips([]); setStep('clips') }}
-          />
-        )}
+      {/* ── Timeline ───────────────────────────────────────────────────────── */}
+      <Timeline
+        clips={clips}
+        texts={texts}
+        audio={audio}
+        playhead={playhead}
+        playing={playing}
+        totalDuration={totalDuration}
+        zoom={zoom}
+        selected={selected}
+        onSetPlayhead={setPlayhead}
+        onSetPlaying={setPlaying}
+        onMoveClip={moveClip}
+        onPackClips={packClips}
+        onSelect={select}
+        onSetZoom={setZoom}
+      />
 
-        {step === 'clips' && template && (
-          <ClipsStep
-            template={template}
-            clips={clips}
-            onChange={setClips}
-            onNext={() => setStep('texts')}
-          />
-        )}
-
-        {step === 'texts' && template && (
-          <TextsStep
-            template={template}
-            texts={texts}
-            onChange={setTexts}
-            onNext={() => setStep('audio')}
-            onBack={() => setStep('clips')}
-          />
-        )}
-
-        {step === 'audio' && template && (
-          <AudioStep
-            template={template}
-            audio={audio}
-            onChange={setAudio}
-            onNext={() => setStep('export')}
-            onBack={() => setStep('texts')}
-          />
-        )}
-
-        {step === 'export' && template && (
-          <PreviewExportStep
-            template={template}
-            clips={clips}
-            texts={texts}
-            audio={audio}
-            onBack={() => setStep('audio')}
-            onReset={resetProject}
-          />
-        )}
-      </div>
+      {/* ── Export modal ───────────────────────────────────────────────────── */}
+      {showExport && (
+        <ExportModal
+          clips={clips}
+          texts={texts}
+          audio={audio}
+          onClose={() => setShowExport(false)}
+        />
+      )}
     </div>
   )
 }
