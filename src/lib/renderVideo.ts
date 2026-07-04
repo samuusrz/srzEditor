@@ -43,6 +43,7 @@ export async function renderVideoInBrowser(
   let audioName: string | null = null
   if (audio) {
     audioName = 'audio_input'
+    // Audio file may be a video file (extracted audio) — ffmpeg handles both
     await ffmpeg.writeFile(audioName, await fetchFile(audio.file))
   }
 
@@ -71,18 +72,24 @@ export async function renderVideoInBrowser(
   const hasText  = drawtextFilters.length > 0
   const hasAudio = audioName !== null
 
+  // Build audio fade filter for the external audio track
+  const audioFadeFilters: string[] = []
+  if (audio && audio.fadeIn > 0)  audioFadeFilters.push(`afade=t=in:st=0:d=${audio.fadeIn}`)
+  if (audio && audio.fadeOut > 0) audioFadeFilters.push(`afade=t=out:st=${Math.max(0, audio.duration - audio.fadeOut)}:d=${audio.fadeOut}`)
+  const audioFadeStr = audioFadeFilters.length > 0 ? `,${audioFadeFilters.join(',')}` : ''
+
   if (hasText && hasAudio) {
     filterComplex = [
       concatFilter,
       `[cv]${drawtextFilters.join(',')}[vout]`,
-      `[ca][${audioIdx}:a]amix=inputs=2:duration=first[aout]`,
+      `[ca][${audioIdx}:a${audioFadeStr}]amix=inputs=2:duration=first[aout]`,
     ].join(';')
     outputMap = ['-map', '[vout]', '-map', '[aout]']
   } else if (hasText) {
     filterComplex = [concatFilter, `[cv]${drawtextFilters.join(',')}[vout]`].join(';')
     outputMap = ['-map', '[vout]', '-map', '[ca]']
   } else if (hasAudio) {
-    filterComplex = [concatFilter, `[ca][${audioIdx}:a]amix=inputs=2:duration=first[aout]`].join(';')
+    filterComplex = [concatFilter, `[ca][${audioIdx}:a${audioFadeStr}]amix=inputs=2:duration=first[aout]`].join(';')
     outputMap = ['-map', '[cv]', '-map', '[aout]']
   } else {
     filterComplex = concatFilter

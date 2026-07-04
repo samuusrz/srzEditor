@@ -8,7 +8,7 @@ export interface Clip {
   duration: number
   originalDuration: number
   trimStart: number
-  volume: number    // 0–1
+  volume: number
   muted: boolean
 }
 
@@ -17,8 +17,8 @@ export interface TextOverlay {
   content: string
   startAt: number
   duration: number
-  x: number        // 0–100 (% of preview width)
-  y: number        // 0–100 (% of preview height)
+  x: number
+  y: number
   fontSize: number
   color: string
   bold: boolean
@@ -32,6 +32,8 @@ export interface AudioTrack {
   startAt: number
   duration: number
   volume: number
+  fadeIn: number    // seconds
+  fadeOut: number   // seconds
 }
 
 export type SelectedItem =

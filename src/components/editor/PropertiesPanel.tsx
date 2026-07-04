@@ -196,6 +196,23 @@ export function PropertiesPanel({
                 className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-sm text-zinc-100 focus:outline-none focus:border-violet-500"
               />
             </div>
+
+            <div className="border-t border-zinc-800 pt-3">
+              <Label>Fade in ({audio.fadeIn.toFixed(1)}s)</Label>
+              <input type="range" min={0} max={10} step={0.1}
+                value={audio.fadeIn}
+                onChange={e => onUpdateAudio({ fadeIn: +e.target.value })}
+                className="w-full accent-violet-500"
+              />
+            </div>
+            <div>
+              <Label>Fade out ({audio.fadeOut.toFixed(1)}s)</Label>
+              <input type="range" min={0} max={10} step={0.1}
+                value={audio.fadeOut}
+                onChange={e => onUpdateAudio({ fadeOut: +e.target.value })}
+                className="w-full accent-violet-500"
+              />
+            </div>
             <button
               onClick={onRemoveAudio}
               className="flex items-center gap-2 text-sm text-red-400 hover:text-red-300 transition-colors cursor-pointer mt-auto"

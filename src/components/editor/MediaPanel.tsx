@@ -88,6 +88,8 @@ export function MediaPanel({
       startAt: 0,
       duration,
       volume: 1,
+      fadeIn: 0,
+      fadeOut: 0,
     })
   }
 

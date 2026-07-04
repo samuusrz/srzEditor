@@ -1,10 +1,11 @@
-import { useRef, useEffect, useCallback } from 'react'
+import { useRef, useEffect, useCallback, useState } from 'react'
 import { Play, Pause, SkipBack, Film } from 'lucide-react'
-import type { Clip, TextOverlay, SelectedItem } from '../../types/editor'
+import type { Clip, TextOverlay, AudioTrack, SelectedItem } from '../../types/editor'
 
 interface Props {
   clips: Clip[]
   texts: TextOverlay[]
+  audio: AudioTrack | null
   playhead: number
   playing: boolean
   totalDuration: number
@@ -21,30 +22,47 @@ function fmt(t: number) {
   return `${m}:${s}`
 }
 
+function calcFadeVolume(t: number, duration: number, fadeIn: number, fadeOut: number, base: number) {
+  let vol = base
+  if (fadeIn > 0 && t < fadeIn) vol *= t / fadeIn
+  if (fadeOut > 0 && t > duration - fadeOut) vol *= (duration - t) / fadeOut
+  return Math.max(0, Math.min(1, vol))
+}
+
+const SNAP = 2.5  // % threshold to trigger snap
+
 export function PreviewPanel({
-  clips, texts, playhead, playing, totalDuration, selected,
+  clips, texts, audio, playhead, playing, totalDuration, selected,
   onSetPlayhead, onSetPlaying, onUpdateText, onSelect,
 }: Props) {
   const videoRef      = useRef<HTMLVideoElement>(null)
+  const audioRef      = useRef<HTMLAudioElement>(null)
   const previewRef    = useRef<HTMLDivElement>(null)
   const playheadRef   = useRef(playhead)
   const rafRef        = useRef(0)
   const lastTimeRef   = useRef(0)
   const prevClipIdRef = useRef<string | null>(null)
+  const prevAudioUrl  = useRef<string | null>(null)
 
   playheadRef.current = playhead
 
   const activeClip  = clips.find(c => c.startAt <= playhead && playhead < c.startAt + c.duration) ?? null
   const activeTexts = texts.filter(t => t.startAt <= playhead && playhead < t.startAt + t.duration)
+  const selTextId   = selected?.type === 'text' ? selected.id : null
 
-  // ── Sync video ───────────────────────────────────────────────────────────
+  // Snap guide state
+  const [guides, setGuides] = useState<{
+    vCenter?: boolean; hCenter?: boolean; vThird1?: boolean; vThird2?: boolean; hThird1?: boolean
+  }>({})
+
+  // ── Sync video ──────────────────────────────────────────────────────────
   useEffect(() => {
     const vid = videoRef.current
     if (!vid) return
     if (!activeClip) { vid.pause(); return }
 
     const targetTime = activeClip.trimStart + (playhead - activeClip.startAt)
-    vid.volume = activeClip.muted ? 0 : activeClip.volume
+    vid.volume = activeClip.muted ? 0 : Math.max(0, Math.min(1, activeClip.volume))
     vid.muted  = activeClip.muted
 
     if (prevClipIdRef.current !== activeClip.id) {
@@ -59,10 +77,39 @@ export function PreviewPanel({
     }
   }, [activeClip?.id, playhead, playing])
 
-  // ── RAF playback ─────────────────────────────────────────────────────────
+  // ── Sync audio track ────────────────────────────────────────────────────
+  useEffect(() => {
+    const aud = audioRef.current
+    if (!aud || !audio) { audioRef.current?.pause(); return }
+
+    const audioTime = playhead - audio.startAt
+
+    if (prevAudioUrl.current !== audio.localUrl) {
+      prevAudioUrl.current = audio.localUrl
+      aud.src = audio.localUrl
+      aud.load()
+    }
+
+    if (audioTime < 0 || audioTime >= audio.duration) {
+      aud.pause()
+      return
+    }
+
+    aud.volume = calcFadeVolume(audioTime, audio.duration, audio.fadeIn, audio.fadeOut, audio.volume)
+
+    if (!playing) {
+      aud.pause()
+      if (Math.abs(aud.currentTime - audioTime) > 0.15) aud.currentTime = audioTime
+    } else {
+      if (Math.abs(aud.currentTime - audioTime) > 0.3) aud.currentTime = audioTime
+      aud.play().catch(() => {})
+    }
+  }, [audio, playhead, playing])
+
+  // ── RAF playback loop ───────────────────────────────────────────────────
   useEffect(() => {
     cancelAnimationFrame(rafRef.current)
-    if (!playing) { videoRef.current?.pause(); return }
+    if (!playing) { videoRef.current?.pause(); audioRef.current?.pause(); return }
 
     videoRef.current?.play().catch(() => {})
     lastTimeRef.current = performance.now()
@@ -79,7 +126,7 @@ export function PreviewPanel({
     return () => cancelAnimationFrame(rafRef.current)
   }, [playing, totalDuration])
 
-  // ── Text drag in preview ─────────────────────────────────────────────────
+  // ── Text drag with snap guides ──────────────────────────────────────────
   const startTextDrag = useCallback((e: React.MouseEvent, text: TextOverlay) => {
     e.stopPropagation()
     onSelect({ type: 'text', id: text.id })
@@ -90,37 +137,43 @@ export function PreviewPanel({
     const origY  = text.y
 
     const onMove = (ev: MouseEvent) => {
-      const dxPct = (ev.clientX - startX) / rect.width * 100
-      const dyPct = (ev.clientY - startY) / rect.height * 100
-      onUpdateText(text.id, {
-        x: Math.max(0, Math.min(100, origX + dxPct)),
-        y: Math.max(0, Math.min(100, origY + dyPct)),
-      })
+      let nx = Math.max(0, Math.min(100, origX + (ev.clientX - startX) / rect.width * 100))
+      let ny = Math.max(0, Math.min(100, origY + (ev.clientY - startY) / rect.height * 100))
+
+      const g: typeof guides = {}
+      if (Math.abs(nx - 50)   < SNAP) { nx = 50;   g.vCenter = true }
+      if (Math.abs(nx - 33.3) < SNAP) { nx = 33.3; g.vThird1 = true }
+      if (Math.abs(nx - 66.7) < SNAP) { nx = 66.7; g.vThird2 = true }
+      if (Math.abs(ny - 50)   < SNAP) { ny = 50;   g.hCenter = true }
+      if (Math.abs(ny - 33.3) < SNAP) { ny = 33.3; g.hThird1 = true }
+      setGuides(g)
+      onUpdateText(text.id, { x: nx, y: ny })
     }
-    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
+    const onUp = () => {
+      setGuides({})
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
   }, [onUpdateText, onSelect])
 
-  // ── Text resize handle ───────────────────────────────────────────────────
+  // ── Text resize handle ──────────────────────────────────────────────────
   const startTextResize = useCallback((e: React.MouseEvent, text: TextOverlay) => {
     e.stopPropagation()
     const startY = e.clientY
     const origFs = text.fontSize
-
-    const onMove = (ev: MouseEvent) => {
-      const newFs = Math.max(10, Math.min(200, origFs + (ev.clientY - startY) * 0.5))
-      onUpdateText(text.id, { fontSize: Math.round(newFs) })
-    }
-    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
+    const onMove = (ev: MouseEvent) => onUpdateText(text.id, { fontSize: Math.max(8, Math.round(origFs + (ev.clientY - startY) * 0.4)) })
+    const onUp   = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
   }, [onUpdateText])
 
-  const selTextId = selected?.type === 'text' ? selected.id : null
-
   return (
     <div className="flex-1 flex flex-col items-center justify-center bg-zinc-950 gap-3 py-4 min-h-0">
+      {/* Hidden audio element for audio track */}
+      <audio ref={audioRef} preload="auto" />
+
       {/* 9:16 preview */}
       <div
         ref={previewRef}
@@ -130,20 +183,21 @@ export function PreviewPanel({
       >
         <video ref={videoRef} className="w-full h-full object-contain" playsInline />
 
+        {/* Snap guides */}
+        {guides.vCenter && <div className="absolute top-0 bottom-0 pointer-events-none" style={{ left: '50%', width: 1, background: 'rgba(139,92,246,0.7)' }} />}
+        {guides.hCenter && <div className="absolute left-0 right-0 pointer-events-none" style={{ top: '50%', height: 1, background: 'rgba(139,92,246,0.7)' }} />}
+        {guides.vThird1 && <div className="absolute top-0 bottom-0 pointer-events-none" style={{ left: '33.3%', width: 1, background: 'rgba(139,92,246,0.45)' }} />}
+        {guides.vThird2 && <div className="absolute top-0 bottom-0 pointer-events-none" style={{ left: '66.7%', width: 1, background: 'rgba(139,92,246,0.45)' }} />}
+        {guides.hThird1 && <div className="absolute left-0 right-0 pointer-events-none" style={{ top: '33.3%', height: 1, background: 'rgba(139,92,246,0.45)' }} />}
+
         {/* Text overlays */}
         {activeTexts.map(t => {
           const isSelected = t.id === selTextId
           return (
             <div
               key={t.id}
-              className={`absolute group ${isSelected ? 'ring-2 ring-violet-400 ring-offset-0 rounded' : ''}`}
-              style={{
-                left: `${t.x}%`,
-                top: `${t.y}%`,
-                transform: 'translate(-50%, -50%)',
-                cursor: 'move',
-                userSelect: 'none',
-              }}
+              className={`absolute ${isSelected ? 'outline outline-2 outline-violet-400 outline-offset-2 rounded-sm' : ''}`}
+              style={{ left: `${t.x}%`, top: `${t.y}%`, transform: 'translate(-50%,-50%)', cursor: 'move', userSelect: 'none' }}
               onMouseDown={e => startTextDrag(e, t)}
               onClick={e => { e.stopPropagation(); onSelect({ type: 'text', id: t.id }) }}
             >
@@ -154,7 +208,7 @@ export function PreviewPanel({
                   color: t.color,
                   fontWeight: t.bold ? 700 : 400,
                   fontFamily: "'TikTok Sans', sans-serif",
-                  WebkitTextStroke: '3px black',
+                  WebkitTextStroke: '3px #000',
                   paintOrder: 'stroke fill',
                   whiteSpace: 'pre',
                   textAlign: 'center',
@@ -163,7 +217,6 @@ export function PreviewPanel({
               >
                 {t.content}
               </span>
-              {/* Resize handle — bottom-right corner */}
               {isSelected && (
                 <div
                   className="absolute -bottom-2 -right-2 w-4 h-4 bg-violet-500 rounded-full border-2 border-white cursor-se-resize z-10"
@@ -184,10 +237,7 @@ export function PreviewPanel({
 
       {/* Controls */}
       <div className="flex items-center gap-3 flex-shrink-0">
-        <button
-          onClick={() => { onSetPlayhead(0); onSetPlaying(false) }}
-          className="text-zinc-500 hover:text-zinc-200 transition-colors cursor-pointer"
-        >
+        <button onClick={() => { onSetPlayhead(0); onSetPlaying(false) }} className="text-zinc-500 hover:text-zinc-200 transition-colors cursor-pointer">
           <SkipBack size={16} />
         </button>
         <button
