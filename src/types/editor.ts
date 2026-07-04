@@ -3,11 +3,13 @@ export interface Clip {
   file: File
   localUrl: string
   name: string
-  thumbnail: string   // base64 jpeg from frame 0
-  startAt: number     // position on timeline (seconds)
-  duration: number    // trimmed duration on timeline
+  thumbnail: string
+  startAt: number
+  duration: number
   originalDuration: number
-  trimStart: number   // offset into source
+  trimStart: number
+  volume: number    // 0–1
+  muted: boolean
 }
 
 export interface TextOverlay {
@@ -15,8 +17,8 @@ export interface TextOverlay {
   content: string
   startAt: number
   duration: number
-  x: number      // 0–100 (% of preview width)
-  y: number      // 0–100 (% of preview height)
+  x: number        // 0–100 (% of preview width)
+  y: number        // 0–100 (% of preview height)
   fontSize: number
   color: string
   bold: boolean
@@ -29,7 +31,7 @@ export interface AudioTrack {
   name: string
   startAt: number
   duration: number
-  volume: number   // 0–1
+  volume: number
 }
 
 export type SelectedItem =
@@ -44,6 +46,6 @@ export interface EditorState {
   audio: AudioTrack | null
   playhead: number
   playing: boolean
-  zoom: number         // px per second
+  zoom: number
   selected: SelectedItem
 }

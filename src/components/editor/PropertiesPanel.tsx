@@ -1,4 +1,4 @@
-import { Trash2 } from 'lucide-react'
+import { Trash2, Volume2, VolumeX } from 'lucide-react'
 import type { Clip, TextOverlay, AudioTrack, SelectedItem } from '../../types/editor'
 
 interface Props {
@@ -12,11 +12,14 @@ interface Props {
   onUpdateAudio: (patch: Partial<AudioTrack>) => void
   onRemoveAudio: () => void
   onRemoveClip: (id: string) => void
+  onSetClipVolume: (id: string, volume: number) => void
+  onToggleClipMute: (id: string) => void
 }
 
 export function PropertiesPanel({
   selected, clips, texts, audio, totalDuration,
   onUpdateText, onRemoveText, onUpdateAudio, onRemoveAudio, onRemoveClip,
+  onSetClipVolume, onToggleClipMute,
 }: Props) {
   if (!selected) {
     return (
@@ -38,7 +41,8 @@ export function PropertiesPanel({
       </div>
 
       <div className="flex-1 p-4 flex flex-col gap-4">
-        {/* ── Clip properties ── */}
+
+        {/* ── Clip ── */}
         {clip && (
           <>
             <div>
@@ -46,15 +50,32 @@ export function PropertiesPanel({
               <p className="text-sm text-zinc-200 truncate">{clip.name}</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Duración</Label>
-                <p className="text-sm text-zinc-200">{clip.duration.toFixed(2)}s</p>
-              </div>
-              <div>
-                <Label>Original</Label>
-                <p className="text-sm text-zinc-200">{clip.originalDuration.toFixed(2)}s</p>
-              </div>
+              <div><Label>Duración</Label><p className="text-sm text-zinc-200">{clip.duration.toFixed(2)}s</p></div>
+              <div><Label>Original</Label><p className="text-sm text-zinc-200">{clip.originalDuration.toFixed(2)}s</p></div>
             </div>
+
+            {/* Volume */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <Label>Volumen</Label>
+                <button
+                  onClick={() => onToggleClipMute(clip.id)}
+                  className="text-zinc-400 hover:text-zinc-100 transition-colors cursor-pointer"
+                  title={clip.muted ? 'Activar sonido' : 'Silenciar'}
+                >
+                  {clip.muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
+                </button>
+              </div>
+              <input
+                type="range" min={0} max={1} step={0.01}
+                value={clip.muted ? 0 : clip.volume}
+                onChange={e => onSetClipVolume(clip.id, +e.target.value)}
+                className="w-full accent-violet-500"
+                disabled={clip.muted}
+              />
+              <span className="text-xs text-zinc-500">{clip.muted ? 'Silenciado' : `${Math.round(clip.volume * 100)}%`}</span>
+            </div>
+
             <button
               onClick={() => onRemoveClip(clip.id)}
               className="flex items-center gap-2 text-sm text-red-400 hover:text-red-300 transition-colors cursor-pointer mt-auto"
@@ -65,7 +86,7 @@ export function PropertiesPanel({
           </>
         )}
 
-        {/* ── Text properties ── */}
+        {/* ── Text ── */}
         {text && (
           <>
             <div>
@@ -73,30 +94,26 @@ export function PropertiesPanel({
               <textarea
                 value={text.content}
                 onChange={e => onUpdateText(text.id, { content: e.target.value })}
-                className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 resize-none focus:outline-none focus:border-violet-500"
+                className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 resize-none focus:outline-none focus:border-violet-500 font-mono"
                 rows={3}
+                wrap="off"
+                style={{ whiteSpace: 'pre', overflowX: 'auto' }}
               />
+              <p className="text-[10px] text-zinc-600 mt-1">Enter para nueva línea</p>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label>Aparece en</Label>
-                <input
-                  type="number"
-                  min={0}
-                  max={totalDuration}
-                  step={0.1}
+                <Label>Inicio (s)</Label>
+                <input type="number" min={0} max={totalDuration} step={0.1}
                   value={text.startAt}
                   onChange={e => onUpdateText(text.id, { startAt: +e.target.value })}
                   className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-sm text-zinc-100 focus:outline-none focus:border-violet-500"
                 />
               </div>
               <div>
-                <Label>Duración</Label>
-                <input
-                  type="number"
-                  min={0.1}
-                  step={0.1}
+                <Label>Duración (s)</Label>
+                <input type="number" min={0.1} step={0.1}
                   value={text.duration}
                   onChange={e => onUpdateText(text.id, { duration: +e.target.value })}
                   className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-sm text-zinc-100 focus:outline-none focus:border-violet-500"
@@ -106,22 +123,16 @@ export function PropertiesPanel({
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label>Posición X (%)</Label>
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
+                <Label>X (%)</Label>
+                <input type="number" min={0} max={100}
                   value={Math.round(text.x)}
                   onChange={e => onUpdateText(text.id, { x: +e.target.value })}
                   className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-sm text-zinc-100 focus:outline-none focus:border-violet-500"
                 />
               </div>
               <div>
-                <Label>Posición Y (%)</Label>
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
+                <Label>Y (%)</Label>
+                <input type="number" min={0} max={100}
                   value={Math.round(text.y)}
                   onChange={e => onUpdateText(text.id, { y: +e.target.value })}
                   className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-sm text-zinc-100 focus:outline-none focus:border-violet-500"
@@ -130,24 +141,18 @@ export function PropertiesPanel({
             </div>
 
             <div>
-              <Label>Tamaño fuente (px)</Label>
-              <input
-                type="range"
-                min={16}
-                max={120}
+              <Label>Tamaño ({text.fontSize}px)</Label>
+              <input type="range" min={10} max={200}
                 value={text.fontSize}
                 onChange={e => onUpdateText(text.id, { fontSize: +e.target.value })}
                 className="w-full accent-violet-500"
               />
-              <span className="text-xs text-zinc-500">{text.fontSize}px</span>
             </div>
 
             <div>
               <Label>Color</Label>
               <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={text.color}
+                <input type="color" value={text.color}
                   onChange={e => onUpdateText(text.id, { color: e.target.value })}
                   className="w-8 h-8 rounded cursor-pointer bg-transparent border-0"
                 />
@@ -157,12 +162,7 @@ export function PropertiesPanel({
 
             <div className="flex items-center justify-between">
               <Label>Negrita</Label>
-              <button
-                onClick={() => onUpdateText(text.id, { bold: !text.bold })}
-                className={`w-10 h-5 rounded-full transition-colors cursor-pointer ${text.bold ? 'bg-violet-500' : 'bg-zinc-700'}`}
-              >
-                <span className={`block w-4 h-4 rounded-full bg-white mx-0.5 transition-transform ${text.bold ? 'translate-x-5' : 'translate-x-0'}`} />
-              </button>
+              <Toggle value={text.bold} onChange={v => onUpdateText(text.id, { bold: v })} />
             </div>
 
             <button
@@ -175,36 +175,22 @@ export function PropertiesPanel({
           </>
         )}
 
-        {/* ── Audio properties ── */}
+        {/* ── Audio ── */}
         {selected.type === 'audio' && audio && (
           <>
+            <div><Label>Canción</Label><p className="text-sm text-zinc-200 truncate">{audio.name}</p></div>
+            <div><Label>Duración</Label><p className="text-sm text-zinc-200">{audio.duration.toFixed(1)}s</p></div>
             <div>
-              <Label>Canción</Label>
-              <p className="text-sm text-zinc-200 truncate">{audio.name}</p>
-            </div>
-            <div>
-              <Label>Duración</Label>
-              <p className="text-sm text-zinc-200">{audio.duration.toFixed(1)}s</p>
-            </div>
-            <div>
-              <Label>Volumen</Label>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
+              <Label>Volumen ({Math.round(audio.volume * 100)}%)</Label>
+              <input type="range" min={0} max={1} step={0.01}
                 value={audio.volume}
                 onChange={e => onUpdateAudio({ volume: +e.target.value })}
                 className="w-full accent-violet-500"
               />
-              <span className="text-xs text-zinc-500">{Math.round(audio.volume * 100)}%</span>
             </div>
             <div>
-              <Label>Inicio en (s)</Label>
-              <input
-                type="number"
-                min={0}
-                step={0.1}
+              <Label>Inicio (s)</Label>
+              <input type="number" min={0} step={0.1}
                 value={audio.startAt}
                 onChange={e => onUpdateAudio({ startAt: +e.target.value })}
                 className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-sm text-zinc-100 focus:outline-none focus:border-violet-500"
@@ -226,4 +212,15 @@ export function PropertiesPanel({
 
 function Label({ children }: { children: React.ReactNode }) {
   return <p className="text-[11px] text-zinc-500 uppercase tracking-wider mb-1">{children}</p>
+}
+
+function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      onClick={() => onChange(!value)}
+      className={`w-10 h-5 rounded-full transition-colors cursor-pointer flex-none ${value ? 'bg-violet-500' : 'bg-zinc-700'}`}
+    >
+      <span className={`block w-4 h-4 rounded-full bg-white mx-0.5 transition-transform ${value ? 'translate-x-5' : 'translate-x-0'}`} />
+    </button>
+  )
 }

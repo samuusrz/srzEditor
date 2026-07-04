@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { Plus, Film, Type, Music, Trash2, Upload } from 'lucide-react'
 import type { Clip, TextOverlay, AudioTrack } from '../../types/editor'
 
@@ -68,6 +69,8 @@ export function MediaPanel({
         duration,
         originalDuration: duration,
         trimStart: 0,
+        volume: 1,
+        muted: false,
       }
       onAddClip(clip)
     }
