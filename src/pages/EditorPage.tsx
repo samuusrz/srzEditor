@@ -49,7 +49,7 @@ export function EditorPage({ onBack }: Props) {
       startAt: Math.max(0, playhead),
       duration: Math.max(3, totalDuration > 0 ? totalDuration : 3),
       x: 50, y: 15,
-      fontSize: 13,
+      fontSize: 36,
       color: '#ffffff',
       bold: true,
     })

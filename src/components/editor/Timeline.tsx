@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import { ZoomIn, ZoomOut, Scissors, Volume2, VolumeX, Layers, Diamond, Trash2 } from 'lucide-react'
 import type { Clip, TextOverlay, AudioTrack, SelectedItem, VolumeKeyframe } from '../../types/editor'
 
@@ -59,6 +59,8 @@ export function Timeline({
   onSetPlayhead, onMoveClip, onTrimClip, onSplitClip, onToggleMute,
   onExtractAudio, onMoveText, onMoveAudio, onDragAudioPos, onDragAudioKf, onSelect, onSetZoom, onSnapshot,
 }: Props) {
+  const [snapLine, setSnapLine] = useState<number | null>(null)
+
   const visibleSecs = Math.max(totalDuration + 5, 15)
   const totalWidth  = visibleSecs * zoom
 
@@ -90,14 +92,31 @@ export function Timeline({
     }
   }
 
-  // ── Clip body drag ───────────────────────────────────────────────────────
+  // ── Clip body drag with snapping ─────────────────────────────────────────
   const startClipDrag = (e: React.MouseEvent, clip: Clip) => {
     onSelect({ type: 'clip', id: clip.id })
     const startX = e.clientX; const orig = clip.startAt
-    makeDrag(
-      ev => onMoveClip(clip.id, Math.max(0, orig + (ev.clientX - startX) / zoom)),
-      () => onSnapshot(),
-    )(e)
+    makeDrag(ev => {
+      const raw    = Math.max(0, orig + (ev.clientX - startX) / zoom)
+      const thresh = 8 / zoom  // 8px snap radius
+
+      // Snap points: timeline start + edges of every other clip
+      const snapPts = [0, ...clips.filter(c => c.id !== clip.id).flatMap(c => [c.startAt, c.startAt + c.duration])]
+
+      let snapped    = raw
+      let snapTarget: number | null = null
+      for (const sp of snapPts) {
+        if (Math.abs(raw - sp) < thresh) {               // snap clip start
+          snapped = sp; snapTarget = sp; break
+        }
+        if (Math.abs(raw + clip.duration - sp) < thresh) { // snap clip end
+          snapped = sp - clip.duration; snapTarget = sp; break
+        }
+      }
+
+      setSnapLine(snapTarget)
+      onMoveClip(clip.id, Math.max(0, snapped))
+    }, () => { setSnapLine(null); onSnapshot() })(e)
   }
 
   // ── Clip trim ────────────────────────────────────────────────────────────
@@ -250,6 +269,11 @@ export function Timeline({
               <div className="w-2.5 h-2.5 bg-red-500 rounded-full -ml-1 mt-4" />
               <div className="w-px h-full bg-red-500/80 -ml-px" />
             </div>
+
+            {/* Snap guide */}
+            {snapLine !== null && (
+              <div className="absolute top-0 bottom-0 z-30 pointer-events-none" style={{ left: snapLine * zoom, width: 1, background: 'rgba(250,204,21,0.9)' }} />
+            )}
 
             {/* ── Video track ── */}
             <div className="relative" style={{ height: TRACK_H }}>

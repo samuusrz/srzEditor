@@ -42,12 +42,14 @@ export function PreviewPanel({
   const audioRef      = useRef<HTMLAudioElement>(null)
   const previewRef    = useRef<HTMLDivElement>(null)
   const playheadRef   = useRef(playhead)
+  const audioTrackRef = useRef(audio)
   const rafRef        = useRef(0)
   const lastTimeRef   = useRef(0)
   const prevClipIdRef = useRef<string | null>(null)
   const prevAudioUrl  = useRef<string | null>(null)
 
   playheadRef.current = playhead
+  audioTrackRef.current = audio
 
   const activeClip  = clips.find(c => c.startAt <= playhead && playhead < c.startAt + c.duration) ?? null
   const activeTexts = texts.filter(t => t.startAt <= playhead && playhead < t.startAt + t.duration)
@@ -122,6 +124,18 @@ export function PreviewPanel({
       const dt = (now - lastTimeRef.current) / 1000
       lastTimeRef.current = now
       const next = playheadRef.current + dt
+
+      // Update audio volume every frame using latest keyframes via ref
+      const aud = audioRef.current
+      const at  = audioTrackRef.current
+      if (aud && at) {
+        const audioTime = next - at.startAt
+        if (audioTime >= 0 && audioTime < at.duration) {
+          const baseVol = getVolumeAtTime(next, at.keyframes, at.volume)
+          aud.volume = calcFadeVolume(audioTime, at.duration, at.fadeIn, at.fadeOut, baseVol)
+        }
+      }
+
       if (next >= totalDuration) { onSetPlaying(false); onSetPlayhead(0); return }
       onSetPlayhead(next)
       rafRef.current = requestAnimationFrame(tick)
@@ -212,12 +226,13 @@ export function PreviewPanel({
                   fontSize: t.fontSize,
                   color: t.color,
                   fontWeight: t.bold ? 700 : 400,
-                  fontFamily: "'TikTok Sans', sans-serif",
-                  WebkitTextStroke: '3px #000',
+                  fontFamily: "'Anton', 'TikTok Sans', sans-serif",
+                  WebkitTextStroke: '5px #000',
                   paintOrder: 'stroke fill',
                   whiteSpace: 'pre',
                   textAlign: 'center',
-                  lineHeight: 1.15,
+                  lineHeight: 1.2,
+                  letterSpacing: '0.01em',
                 }}
               >
                 {t.content}
