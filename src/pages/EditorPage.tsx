@@ -13,7 +13,7 @@ export function EditorPage({ onBack }: Props) {
   const [showExport, setShowExport] = useState(false)
   const {
     state, totalDuration,
-    canUndo, canRedo, undo, redo,
+    canUndo, canRedo, undo, redo, snapshot,
     addClip, removeClip, moveClip, trimClip, splitClip,
     setClipVolume, toggleClipMute, extractAudio,
     addText, updateText, removeText, moveText,
@@ -108,7 +108,7 @@ export function EditorPage({ onBack }: Props) {
           playhead={playhead} playing={playing} totalDuration={totalDuration}
           selected={selected}
           onSetPlayhead={setPlayhead} onSetPlaying={setPlaying}
-          onUpdateText={updateText} onSelect={select}
+          onUpdateText={updateText} onSelect={select} onSnapshot={snapshot}
         />
         <PropertiesPanel
           selected={selected} clips={clips} texts={texts} audio={audio} totalDuration={totalDuration}
@@ -126,7 +126,7 @@ export function EditorPage({ onBack }: Props) {
         onMoveClip={moveClip} onTrimClip={trimClip} onSplitClip={splitClip}
         onToggleMute={toggleClipMute} onExtractAudio={extractAudio}
         onMoveText={moveText} onMoveAudio={updateAudio}
-        onSelect={select} onSetZoom={setZoom}
+        onSelect={select} onSetZoom={setZoom} onSnapshot={snapshot}
       />
 
       {showExport && (

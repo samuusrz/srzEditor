@@ -90,6 +90,7 @@ export function MediaPanel({
       volume: 1,
       fadeIn: 0,
       fadeOut: 0,
+      keyframes: [],
     })
   }
 

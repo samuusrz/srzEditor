@@ -4,6 +4,7 @@ import type { Clip, TextOverlay, AudioTrack, SelectedItem, EditorState } from '.
 // ── Actions ──────────────────────────────────────────────────────────────────
 
 type Action =
+  | { type: 'SNAPSHOT' }   // saves current state to undo history without changing it
   | { type: 'ADD_CLIP'; clip: Clip }
   | { type: 'REMOVE_CLIP'; id: string }
   | { type: 'MOVE_CLIP'; id: string; startAt: number }
@@ -24,12 +25,15 @@ type Action =
   | { type: 'SET_ZOOM'; zoom: number }
   | { type: 'SELECT'; item: SelectedItem }
 
-// These actions are recorded in the undo history
+// These actions are recorded in the undo history.
+// Drag actions (MOVE_CLIP, TRIM_CLIP, MOVE_TEXT) are NOT here —
+// they fire on every pixel. Instead a SNAPSHOT is dispatched on mouseUp.
 const UNDOABLE = new Set([
-  'ADD_CLIP', 'REMOVE_CLIP', 'MOVE_CLIP', 'TRIM_CLIP', 'SPLIT_CLIP',
+  'ADD_CLIP', 'REMOVE_CLIP', 'SPLIT_CLIP',
   'SET_CLIP_VOLUME', 'TOGGLE_CLIP_MUTE', 'EXTRACT_AUDIO',
-  'ADD_TEXT', 'UPDATE_TEXT', 'REMOVE_TEXT', 'MOVE_TEXT',
+  'ADD_TEXT', 'UPDATE_TEXT', 'REMOVE_TEXT',
   'SET_AUDIO', 'UPDATE_AUDIO', 'REMOVE_AUDIO',
+  'SNAPSHOT',
 ])
 
 // ── Core reducer ─────────────────────────────────────────────────────────────
@@ -41,6 +45,7 @@ const editorInit: EditorState = {
 
 function editorReducer(state: EditorState, action: Action): EditorState {
   switch (action.type) {
+    case 'SNAPSHOT': return state  // history wrapper handles this
     case 'ADD_CLIP': {
       const end = state.clips.reduce((m, c) => Math.max(m, c.startAt + c.duration), 0)
       return { ...state, clips: [...state.clips, { ...action.clip, startAt: end }] }
@@ -72,7 +77,7 @@ function editorReducer(state: EditorState, action: Action): EditorState {
       const audio: AudioTrack = {
         id: crypto.randomUUID(), file: clip.file, localUrl: clip.localUrl,
         name: `Audio · ${clip.name}`, startAt: clip.startAt, duration: clip.originalDuration,
-        volume: 1, fadeIn: 0, fadeOut: 0,
+        volume: 1, fadeIn: 0, fadeOut: 0, keyframes: [],
       }
       return { ...state, audio, clips: state.clips.map(c => c.id === action.clipId ? { ...c, muted: true } : c) }
     }
@@ -162,6 +167,7 @@ export function useEditor() {
     canRedo: hist.future.length > 0,
     undo:           useCallback(() => dispatch({ type: 'UNDO' }), []),
     redo:           useCallback(() => dispatch({ type: 'REDO' }), []),
+    snapshot:       useCallback(() => dispatch({ type: 'SNAPSHOT' }), []),
     addClip:        useCallback((clip: Clip) => dispatch({ type: 'ADD_CLIP', clip }), []),
     removeClip:     useCallback((id: string) => dispatch({ type: 'REMOVE_CLIP', id }), []),
     moveClip:       useCallback((id: string, startAt: number) => dispatch({ type: 'MOVE_CLIP', id, startAt }), []),

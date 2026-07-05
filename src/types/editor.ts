@@ -24,6 +24,11 @@ export interface TextOverlay {
   bold: boolean
 }
 
+export interface VolumeKeyframe {
+  time: number    // absolute seconds on timeline
+  volume: number  // 0–1
+}
+
 export interface AudioTrack {
   id: string
   file: File
@@ -32,8 +37,9 @@ export interface AudioTrack {
   startAt: number
   duration: number
   volume: number
-  fadeIn: number    // seconds
-  fadeOut: number   // seconds
+  fadeIn: number
+  fadeOut: number
+  keyframes: VolumeKeyframe[]  // volume automation
 }
 
 export type SelectedItem =

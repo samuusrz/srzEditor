@@ -1,6 +1,7 @@
 import { useRef, useEffect, useCallback, useState } from 'react'
 import { Play, Pause, SkipBack, Film } from 'lucide-react'
 import type { Clip, TextOverlay, AudioTrack, SelectedItem } from '../../types/editor'
+import { getVolumeAtTime } from './Timeline'
 
 interface Props {
   clips: Clip[]
@@ -14,6 +15,7 @@ interface Props {
   onSetPlaying: (p: boolean) => void
   onUpdateText: (id: string, patch: Partial<TextOverlay>) => void
   onSelect: (item: SelectedItem) => void
+  onSnapshot: () => void
 }
 
 function fmt(t: number) {
@@ -33,7 +35,7 @@ const SNAP = 2.5  // % threshold to trigger snap
 
 export function PreviewPanel({
   clips, texts, audio, playhead, playing, totalDuration, selected,
-  onSetPlayhead, onSetPlaying, onUpdateText, onSelect,
+  onSetPlayhead, onSetPlaying, onUpdateText, onSelect, onSnapshot,
 }: Props) {
   const videoRef      = useRef<HTMLVideoElement>(null)
   const audioRef      = useRef<HTMLAudioElement>(null)
@@ -95,7 +97,8 @@ export function PreviewPanel({
       return
     }
 
-    aud.volume = calcFadeVolume(audioTime, audio.duration, audio.fadeIn, audio.fadeOut, audio.volume)
+    const baseVol = getVolumeAtTime(playhead, audio.keyframes, audio.volume)
+    aud.volume = calcFadeVolume(audioTime, audio.duration, audio.fadeIn, audio.fadeOut, baseVol)
 
     if (!playing) {
       aud.pause()
@@ -151,6 +154,7 @@ export function PreviewPanel({
     }
     const onUp = () => {
       setGuides({})
+      onSnapshot()
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
     }
