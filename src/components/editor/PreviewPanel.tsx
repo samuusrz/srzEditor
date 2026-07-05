@@ -14,6 +14,7 @@ interface Props {
   onSetPlayhead: (t: number) => void
   onSetPlaying: (p: boolean) => void
   onUpdateText: (id: string, patch: Partial<TextOverlay>) => void
+  onDragTextPos: (id: string, x: number, y: number) => void
   onSelect: (item: SelectedItem) => void
   onSnapshot: () => void
 }
@@ -35,7 +36,7 @@ const SNAP = 2.5  // % threshold to trigger snap
 
 export function PreviewPanel({
   clips, texts, audio, playhead, playing, totalDuration, selected,
-  onSetPlayhead, onSetPlaying, onUpdateText, onSelect, onSnapshot,
+  onSetPlayhead, onSetPlaying, onUpdateText, onDragTextPos, onSelect, onSnapshot,
 }: Props) {
   const videoRef      = useRef<HTMLVideoElement>(null)
   const audioRef      = useRef<HTMLAudioElement>(null)
@@ -150,7 +151,7 @@ export function PreviewPanel({
       if (Math.abs(ny - 50)   < SNAP) { ny = 50;   g.hCenter = true }
       if (Math.abs(ny - 33.3) < SNAP) { ny = 33.3; g.hThird1 = true }
       setGuides(g)
-      onUpdateText(text.id, { x: nx, y: ny })
+      onDragTextPos(text.id, nx, ny)
     }
     const onUp = () => {
       setGuides({})
@@ -160,7 +161,7 @@ export function PreviewPanel({
     }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
-  }, [onUpdateText, onSelect])
+  }, [onDragTextPos, onSelect])
 
   // ── Text resize handle ──────────────────────────────────────────────────
   const startTextResize = useCallback((e: React.MouseEvent, text: TextOverlay) => {

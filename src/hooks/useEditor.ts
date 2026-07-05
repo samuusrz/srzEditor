@@ -1,39 +1,38 @@
 import { useReducer, useCallback } from 'react'
-import type { Clip, TextOverlay, AudioTrack, SelectedItem, EditorState } from '../types/editor'
+import type { Clip, TextOverlay, AudioTrack, SelectedItem, EditorState, VolumeKeyframe } from '../types/editor'
 
 // ── Actions ──────────────────────────────────────────────────────────────────
 
 type Action =
-  | { type: 'SNAPSHOT' }   // saves current state to undo history without changing it
   | { type: 'ADD_CLIP'; clip: Clip }
   | { type: 'REMOVE_CLIP'; id: string }
-  | { type: 'MOVE_CLIP'; id: string; startAt: number }
-  | { type: 'TRIM_CLIP'; id: string; trimStart: number; duration: number; startAt: number }
+  | { type: 'MOVE_CLIP'; id: string; startAt: number }          // drag (not undoable)
+  | { type: 'TRIM_CLIP'; id: string; trimStart: number; duration: number; startAt: number } // drag
   | { type: 'SPLIT_CLIP'; clipId: string; at: number }
   | { type: 'SET_CLIP_VOLUME'; id: string; volume: number }
   | { type: 'TOGGLE_CLIP_MUTE'; id: string }
   | { type: 'EXTRACT_AUDIO'; clipId: string }
   | { type: 'ADD_TEXT'; text: TextOverlay }
-  | { type: 'UPDATE_TEXT'; id: string; patch: Partial<TextOverlay> }
+  | { type: 'UPDATE_TEXT'; id: string; patch: Partial<TextOverlay> }  // undoable
+  | { type: 'DRAG_TEXT_POS'; id: string; x: number; y: number }       // drag (not undoable)
   | { type: 'REMOVE_TEXT'; id: string }
-  | { type: 'MOVE_TEXT'; id: string; startAt: number }
+  | { type: 'MOVE_TEXT'; id: string; startAt: number }          // drag (not undoable)
   | { type: 'SET_AUDIO'; audio: AudioTrack }
-  | { type: 'UPDATE_AUDIO'; patch: Partial<AudioTrack> }
+  | { type: 'UPDATE_AUDIO'; patch: Partial<AudioTrack> }        // undoable (property panel)
+  | { type: 'DRAG_AUDIO_POS'; startAt: number }                 // drag (not undoable)
+  | { type: 'DRAG_AUDIO_KF'; keyframes: VolumeKeyframe[] }      // drag (not undoable)
   | { type: 'REMOVE_AUDIO' }
   | { type: 'SET_PLAYHEAD'; time: number }
   | { type: 'SET_PLAYING'; playing: boolean }
   | { type: 'SET_ZOOM'; zoom: number }
   | { type: 'SELECT'; item: SelectedItem }
 
-// These actions are recorded in the undo history.
-// Drag actions (MOVE_CLIP, TRIM_CLIP, MOVE_TEXT) are NOT here —
-// they fire on every pixel. Instead a SNAPSHOT is dispatched on mouseUp.
+// Only these actions are saved to the undo history
 const UNDOABLE = new Set([
   'ADD_CLIP', 'REMOVE_CLIP', 'SPLIT_CLIP',
   'SET_CLIP_VOLUME', 'TOGGLE_CLIP_MUTE', 'EXTRACT_AUDIO',
   'ADD_TEXT', 'UPDATE_TEXT', 'REMOVE_TEXT',
   'SET_AUDIO', 'UPDATE_AUDIO', 'REMOVE_AUDIO',
-  'SNAPSHOT',
 ])
 
 // ── Core reducer ─────────────────────────────────────────────────────────────
@@ -45,7 +44,6 @@ const editorInit: EditorState = {
 
 function editorReducer(state: EditorState, action: Action): EditorState {
   switch (action.type) {
-    case 'SNAPSHOT': return state  // history wrapper handles this
     case 'ADD_CLIP': {
       const end = state.clips.reduce((m, c) => Math.max(m, c.startAt + c.duration), 0)
       return { ...state, clips: [...state.clips, { ...action.clip, startAt: end }] }
@@ -85,6 +83,8 @@ function editorReducer(state: EditorState, action: Action): EditorState {
       return { ...state, texts: [...state.texts, action.text], selected: { type: 'text', id: action.text.id } }
     case 'UPDATE_TEXT':
       return { ...state, texts: state.texts.map(t => t.id === action.id ? { ...t, ...action.patch } : t) }
+    case 'DRAG_TEXT_POS':
+      return { ...state, texts: state.texts.map(t => t.id === action.id ? { ...t, x: action.x, y: action.y } : t) }
     case 'REMOVE_TEXT':
       return { ...state, texts: state.texts.filter(t => t.id !== action.id), selected: null }
     case 'MOVE_TEXT':
@@ -93,6 +93,10 @@ function editorReducer(state: EditorState, action: Action): EditorState {
       return { ...state, audio: action.audio }
     case 'UPDATE_AUDIO':
       return { ...state, audio: state.audio ? { ...state.audio, ...action.patch } : null }
+    case 'DRAG_AUDIO_POS':
+      return { ...state, audio: state.audio ? { ...state.audio, startAt: Math.max(0, action.startAt) } : null }
+    case 'DRAG_AUDIO_KF':
+      return { ...state, audio: state.audio ? { ...state.audio, keyframes: action.keyframes } : null }
     case 'REMOVE_AUDIO':
       return { ...state, audio: null, selected: null }
     case 'SET_PLAYHEAD':
@@ -116,11 +120,20 @@ interface History {
   future: EditorState[]
 }
 
-type HistoryAction = Action | { type: 'UNDO' } | { type: 'REDO' }
+type HistoryAction = Action | { type: 'UNDO' } | { type: 'REDO' } | { type: 'SNAPSHOT' }
 
 const MAX_HISTORY = 60
 
+function pushHistory(hist: History, newPresent: EditorState): History {
+  return {
+    past: [...hist.past.slice(-(MAX_HISTORY - 1)), hist.present],
+    present: newPresent,
+    future: [],
+  }
+}
+
 function historyReducer(hist: History, action: HistoryAction): History {
+  // Undo / Redo
   if (action.type === 'UNDO') {
     if (!hist.past.length) return hist
     return {
@@ -138,16 +151,26 @@ function historyReducer(hist: History, action: HistoryAction): History {
     }
   }
 
+  // Snapshot: save current state to undo history without modifying it
+  // (called on mouseUp after a drag)
+  if (action.type === 'SNAPSHOT') {
+    const last = hist.past[hist.past.length - 1]
+    if (last === hist.present) return hist  // nothing changed since last snapshot
+    return {
+      past: [...hist.past.slice(-(MAX_HISTORY - 1)), hist.present],
+      present: hist.present,
+      future: [],
+    }
+  }
+
+  // Normal action
   const newPresent = editorReducer(hist.present, action as Action)
   if (newPresent === hist.present) return hist
 
   if (UNDOABLE.has(action.type)) {
-    return {
-      past: [...hist.past.slice(-(MAX_HISTORY - 1)), hist.present],
-      present: newPresent,
-      future: [],
-    }
+    return pushHistory(hist, newPresent)
   }
+  // Non-undoable: update present only, keep past/future
   return { ...hist, present: newPresent }
 }
 
@@ -178,10 +201,13 @@ export function useEditor() {
     extractAudio:   useCallback((clipId: string) => dispatch({ type: 'EXTRACT_AUDIO', clipId }), []),
     addText:        useCallback((text: TextOverlay) => dispatch({ type: 'ADD_TEXT', text }), []),
     updateText:     useCallback((id: string, patch: Partial<TextOverlay>) => dispatch({ type: 'UPDATE_TEXT', id, patch }), []),
+    dragTextPos:    useCallback((id: string, x: number, y: number) => dispatch({ type: 'DRAG_TEXT_POS', id, x, y }), []),
     removeText:     useCallback((id: string) => dispatch({ type: 'REMOVE_TEXT', id }), []),
     moveText:       useCallback((id: string, startAt: number) => dispatch({ type: 'MOVE_TEXT', id, startAt }), []),
     setAudio:       useCallback((audio: AudioTrack) => dispatch({ type: 'SET_AUDIO', audio }), []),
     updateAudio:    useCallback((patch: Partial<AudioTrack>) => dispatch({ type: 'UPDATE_AUDIO', patch }), []),
+    dragAudioPos:   useCallback((startAt: number) => dispatch({ type: 'DRAG_AUDIO_POS', startAt }), []),
+    dragAudioKf:    useCallback((keyframes: VolumeKeyframe[]) => dispatch({ type: 'DRAG_AUDIO_KF', keyframes }), []),
     removeAudio:    useCallback(() => dispatch({ type: 'REMOVE_AUDIO' }), []),
     setPlayhead:    useCallback((time: number) => dispatch({ type: 'SET_PLAYHEAD', time }), []),
     setPlaying:     useCallback((playing: boolean) => dispatch({ type: 'SET_PLAYING', playing }), []),

@@ -47,6 +47,8 @@ interface Props {
   onExtractAudio: (clipId: string) => void
   onMoveText: (id: string, startAt: number) => void
   onMoveAudio: (patch: Partial<AudioTrack>) => void
+  onDragAudioPos: (startAt: number) => void
+  onDragAudioKf: (keyframes: VolumeKeyframe[]) => void
   onSelect: (item: SelectedItem) => void
   onSetZoom: (z: number) => void
   onSnapshot: () => void
@@ -55,7 +57,7 @@ interface Props {
 export function Timeline({
   clips, texts, audio, playhead, totalDuration, zoom, selected,
   onSetPlayhead, onMoveClip, onTrimClip, onSplitClip, onToggleMute,
-  onExtractAudio, onMoveText, onMoveAudio, onSelect, onSetZoom, onSnapshot,
+  onExtractAudio, onMoveText, onMoveAudio, onDragAudioPos, onDragAudioKf, onSelect, onSetZoom, onSnapshot,
 }: Props) {
   const visibleSecs = Math.max(totalDuration + 5, 15)
   const totalWidth  = visibleSecs * zoom
@@ -130,7 +132,7 @@ export function Timeline({
     onSelect({ type: 'audio' })
     const startX = e.clientX; const orig = audio.startAt
     makeDrag(
-      ev => onMoveAudio({ startAt: Math.max(0, orig + (ev.clientX - startX) / zoom) }),
+      ev => onDragAudioPos(Math.max(0, orig + (ev.clientX - startX) / zoom)),
       () => onSnapshot(),
     )(e)
   }
@@ -145,7 +147,7 @@ export function Timeline({
       const dy     = (ev.clientY - startY) / TRACK_H
       const newVol = Math.max(0, Math.min(1, origVol - dy * 1.5))
       const newKfs = audio.keyframes.map((kf, i) => i === idx ? { ...kf, volume: newVol } : kf)
-      onMoveAudio({ keyframes: newKfs })
+      onDragAudioKf(newKfs)
     }, () => onSnapshot())(e)
   }
 
