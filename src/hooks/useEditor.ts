@@ -174,12 +174,14 @@ function historyReducer(hist: History, action: HistoryAction): History {
   return { ...hist, present: newPresent }
 }
 
-const histInit: History = { past: [], present: editorInit, future: [] }
-
 // ── Hook ─────────────────────────────────────────────────────────────────────
 
-export function useEditor() {
-  const [hist, dispatch] = useReducer(historyReducer, histInit)
+export function useEditor(initialState?: EditorState) {
+  const [hist, dispatch] = useReducer(
+    historyReducer,
+    initialState,
+    (init): History => ({ past: [], present: init ?? editorInit, future: [] }),
+  )
   const state = hist.present
   const totalDuration = state.clips.reduce((m, c) => Math.max(m, c.startAt + c.duration), 0)
 

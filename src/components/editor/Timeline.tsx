@@ -92,7 +92,7 @@ export function Timeline({
     }
   }
 
-  // ── Clip body drag with snapping ─────────────────────────────────────────
+  // ── Clip body drag with snapping + push-on-overlap ───────────────────────
   const startClipDrag = (e: React.MouseEvent, clip: Clip) => {
     onSelect({ type: 'clip', id: clip.id })
     const startX = e.clientX; const orig = clip.startAt
@@ -101,16 +101,33 @@ export function Timeline({
       const thresh = 8 / zoom  // 8px snap radius
 
       // Snap points: timeline start + edges of every other clip
-      const snapPts = [0, ...clips.filter(c => c.id !== clip.id).flatMap(c => [c.startAt, c.startAt + c.duration])]
+      const others  = clips.filter(c => c.id !== clip.id)
+      const snapPts = [0, ...others.flatMap(c => [c.startAt, c.startAt + c.duration])]
 
       let snapped    = raw
       let snapTarget: number | null = null
       for (const sp of snapPts) {
-        if (Math.abs(raw - sp) < thresh) {               // snap clip start
+        if (Math.abs(raw - sp) < thresh) {
           snapped = sp; snapTarget = sp; break
         }
-        if (Math.abs(raw + clip.duration - sp) < thresh) { // snap clip end
+        if (Math.abs(raw + clip.duration - sp) < thresh) {
           snapped = sp - clip.duration; snapTarget = sp; break
+        }
+      }
+
+      // Push-on-overlap: if snapped position overlaps another clip, push to before/after it
+      for (const other of others) {
+        const aStart = snapped;              const aEnd = snapped + clip.duration
+        const bStart = other.startAt;        const bEnd = other.startAt + other.duration
+        if (aStart < bEnd && aEnd > bStart) {
+          if (snapped + clip.duration / 2 < bStart + other.duration / 2) {
+            snapped    = Math.max(0, bStart - clip.duration)
+            snapTarget = bStart
+          } else {
+            snapped    = bEnd
+            snapTarget = bEnd
+          }
+          break
         }
       }
 
@@ -333,7 +350,7 @@ export function Timeline({
                     onClick={() => onSelect({ type: 'audio' })}
                   >
                     {/* Waveform bg */}
-                    <Waveform />
+                    <Waveform width={w} />
 
                     {/* Volume envelope */}
                     <svg
@@ -400,12 +417,16 @@ function CtrlBtn({ onClick, icon, label, disabled, danger }: { onClick: () => vo
   )
 }
 
-function Waveform() {
+function Waveform({ width }: { width: number }) {
+  const count = Math.min(500, Math.max(10, Math.floor(width / 3)))
   return (
-    <div className="absolute inset-0 flex items-center gap-px px-1 opacity-20 overflow-hidden">
-      {Array.from({ length: 100 }).map((_, i) => (
-        <div key={i} className="flex-none w-px bg-emerald-300 rounded"
-          style={{ height: `${15 + Math.abs(Math.sin(i * 0.8) * 20 + Math.cos(i * 0.3) * 15)}%` }} />
+    <div className="absolute inset-0 flex items-center gap-px px-0.5 opacity-20">
+      {Array.from({ length: count }).map((_, i) => (
+        <div
+          key={i}
+          className="flex-1 bg-emerald-300 rounded-sm min-w-0"
+          style={{ height: `${15 + Math.abs(Math.sin(i * 0.8) * 20 + Math.cos(i * 0.3) * 15)}%` }}
+        />
       ))}
     </div>
   )

@@ -4,16 +4,21 @@ import { getTemplates, getProjects } from '../lib/db'
 import type { Template, VideoProject } from '../types'
 import { Button } from '../components/ui/Button'
 import { StatusBadge } from '../components/ui/Badge'
+import { listProjects, loadProject, hydrateEditorState, type EditorProject } from '../lib/projectStorage'
+import type { EditorState } from '../types/editor'
 
 type Page = 'dashboard' | 'templates' | 'editor' | 'texts' | 'songs' | 'history'
 
 interface DashboardPageProps {
   onNavigate: (page: Page) => void
+  onNewEditor: () => void
+  onOpenProject: (id: string, state: EditorState) => void
 }
 
-export function DashboardPage({ onNavigate }: DashboardPageProps) {
+export function DashboardPage({ onNavigate, onNewEditor, onOpenProject }: DashboardPageProps) {
   const [templates, setTemplates] = useState<Template[]>([])
   const [projects, setProjects] = useState<VideoProject[]>([])
+  const [editorProjects, setEditorProjects] = useState<EditorProject[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -21,7 +26,16 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
       .then(([t, p]) => { setTemplates(t); setProjects(p) })
       .catch(console.error)
       .finally(() => setLoading(false))
+    listProjects()
+      .then(ps => setEditorProjects(ps.slice(0, 6)))
+      .catch(console.error)
   }, [])
+
+  const handleOpenEditorProject = async (p: EditorProject) => {
+    const proj = await loadProject(p.id).catch(() => null)
+    if (!proj) return
+    onOpenProject(proj.id, hydrateEditorState(proj.state))
+  }
 
   const recentProjects = projects.slice(0, 3)
 
@@ -46,7 +60,7 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
         </button>
 
         <button
-          onClick={() => onNavigate('editor')}
+          onClick={onNewEditor}
           className="group bg-zinc-900 border border-zinc-800 rounded-xl p-5 text-left hover:border-violet-700 hover:bg-zinc-800/60 transition-all cursor-pointer"
         >
           <div className="w-10 h-10 bg-violet-900/40 rounded-lg flex items-center justify-center mb-3 group-hover:bg-violet-800/50 transition-colors">
@@ -99,6 +113,37 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
                 </div>
                 <StatusBadge status={p.status} />
               </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Recent editor projects */}
+      {editorProjects.length > 0 && (
+        <div className="mb-10">
+          <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wide mb-3">Ediciones recientes</h2>
+          <div className="grid grid-cols-3 gap-3">
+            {editorProjects.map(p => (
+              <button
+                key={p.id}
+                onClick={() => handleOpenEditorProject(p)}
+                className="group bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden text-left hover:border-violet-700 transition-all cursor-pointer"
+              >
+                <div className="bg-zinc-800 relative overflow-hidden" style={{ aspectRatio: '9/16', maxHeight: 110 }}>
+                  {p.thumbnail
+                    ? <img src={p.thumbnail} className="w-full h-full object-cover" alt="" />
+                    : <div className="absolute inset-0 flex items-center justify-center text-zinc-600"><Film size={22} /></div>
+                  }
+                </div>
+                <div className="p-2">
+                  <p className="text-xs font-medium text-zinc-200 truncate">{p.name}</p>
+                  <p className="text-[10px] text-zinc-500 mt-0.5">
+                    {new Date(p.updatedAt).toLocaleDateString('es-ES', {
+                      day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+                    })}
+                  </p>
+                </div>
+              </button>
             ))}
           </div>
         </div>

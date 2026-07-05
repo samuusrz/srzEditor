@@ -1,16 +1,26 @@
-import { useState, useEffect } from 'react'
-import { ArrowLeft, Download, Undo2, Redo2 } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { ArrowLeft, Download, Undo2, Redo2, Check } from 'lucide-react'
 import { useEditor } from '../hooks/useEditor'
+import { saveProject, editorStateToProject } from '../lib/projectStorage'
+import type { EditorState } from '../types/editor'
 import { MediaPanel }      from '../components/editor/MediaPanel'
 import { PreviewPanel }    from '../components/editor/PreviewPanel'
 import { PropertiesPanel } from '../components/editor/PropertiesPanel'
 import { Timeline }        from '../components/editor/Timeline'
 import { ExportModal }     from '../components/editor/ExportModal'
 
-interface Props { onBack: () => void }
+interface Props {
+  onBack: () => void
+  projectId: string
+  initialEditorState?: EditorState
+}
 
-export function EditorPage({ onBack }: Props) {
+export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
   const [showExport, setShowExport] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   const {
     state, totalDuration,
     canUndo, canRedo, undo, redo, snapshot,
@@ -19,9 +29,25 @@ export function EditorPage({ onBack }: Props) {
     addText, updateText, dragTextPos, removeText, moveText,
     setAudio, updateAudio, dragAudioPos, dragAudioKf, removeAudio,
     setPlayhead, setPlaying, setZoom, select,
-  } = useEditor()
+  } = useEditor(initialEditorState)
 
   const { clips, texts, audio, playhead, playing, zoom, selected } = state
+
+  // ── Auto-save ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (clips.length === 0 && texts.length === 0 && !audio) return
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => {
+      saveProject(editorStateToProject(state, projectId))
+        .then(() => {
+          setSaved(true)
+          if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+          savedTimerRef.current = setTimeout(() => setSaved(false), 2000)
+        })
+        .catch(console.error)
+    }, 1500)
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
+  }, [clips, texts, audio, zoom, projectId])
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────
   useEffect(() => {
@@ -66,6 +92,11 @@ export function EditorPage({ onBack }: Props) {
           </button>
           <span className="text-zinc-700">|</span>
           <span className="text-sm font-semibold text-zinc-200">SRZ Editor</span>
+          {saved && (
+            <span className="flex items-center gap-1 text-xs text-emerald-400 ml-2">
+              <Check size={11} /> Guardado
+            </span>
+          )}
         </div>
 
         {/* Undo / Redo */}

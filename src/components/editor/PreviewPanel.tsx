@@ -133,6 +133,9 @@ export function PreviewPanel({
         if (audioTime >= 0 && audioTime < at.duration) {
           const baseVol = getVolumeAtTime(next, at.keyframes, at.volume)
           aud.volume = calcFadeVolume(audioTime, at.duration, at.fadeIn, at.fadeOut, baseVol)
+          if (aud.paused) aud.play().catch(() => {})
+        } else {
+          if (!aud.paused) aud.pause()
         }
       }
 
@@ -225,14 +228,13 @@ export function PreviewPanel({
                   display: 'block',
                   fontSize: t.fontSize,
                   color: t.color,
-                  fontWeight: t.bold ? 700 : 400,
-                  fontFamily: "'Anton', 'TikTok Sans', sans-serif",
-                  WebkitTextStroke: '5px #000',
+                  fontWeight: 900,
+                  fontFamily: "'TikTok Sans', sans-serif",
+                  WebkitTextStroke: '4px #000',
                   paintOrder: 'stroke fill',
                   whiteSpace: 'pre',
                   textAlign: 'center',
                   lineHeight: 1.2,
-                  letterSpacing: '0.01em',
                 }}
               >
                 {t.content}
