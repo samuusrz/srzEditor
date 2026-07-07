@@ -102,7 +102,7 @@ export function MediaPanel({
     onAddText({
       id: crypto.randomUUID(), content: 'Texto',
       startAt: 0, duration: Math.max(3, totalDuration),
-      x: 50, y: 15, fontSize: 36, color: '#ffffff', bold: true,
+      x: 50, y: 15, fontSize: 21, color: '#ffffff', bold: true,
     })
   }
 
@@ -240,7 +240,7 @@ function TextLibraryPane({ onAddText, totalDuration }: { onAddText: (t: TextOver
     onAddText({
       id: crypto.randomUUID(), content: item.content,
       startAt: 0, duration: Math.max(3, totalDuration),
-      x: 50, y: 15, fontSize: 36, color: '#ffffff', bold: true,
+      x: 50, y: 15, fontSize: 21, color: '#ffffff', bold: true,
     })
   }
 

@@ -421,11 +421,31 @@ export function Timeline({
       const bx1 = Math.max(x0, x1)
 
       if (bx1 - bx0 > 5) {
-        // Meaningful band — select items within time range
+        // Meaningful band — select items within time range AND vertical track bounds
         const t0 = bx0 / zoom
         const t1 = bx1 / zoom
-        const clipIds = clips.filter(c => c.startAt < t1 && c.startAt + c.duration > t0).map(c => c.id)
-        const textIds = texts.filter(t => t.startAt < t1 && t.startAt + t.duration > t0).map(t => t.id)
+        const y1_up = ev.clientY - rect.top
+        const by0 = Math.min(y0, y1_up)
+        const by1 = Math.max(y0, y1_up)
+
+        // Helper: does a track row at index `idx` overlap with the band's Y range?
+        const trackOverlaps = (idx: number) => {
+          const rowY0 = RULER_H + idx * TRACK_H
+          return rowY0 < by1 && rowY0 + TRACK_H > by0
+        }
+
+        const nVideo = videoTracks.length
+
+        const clipIds = clips.filter(c => {
+          const trackIdx = c.track ?? 0
+          return trackOverlaps(trackIdx) && c.startAt < t1 && c.startAt + c.duration > t0
+        }).map(c => c.id)
+
+        // Text track sits after all video tracks
+        const textIds = trackOverlaps(nVideo)
+          ? texts.filter(t => t.startAt < t1 && t.startAt + t.duration > t0).map(t => t.id)
+          : []
+
         if (clipIds.length + textIds.length > 1) {
           onSelect({ type: 'multi', clipIds, textIds })
         } else if (clipIds.length === 1 && textIds.length === 0) {

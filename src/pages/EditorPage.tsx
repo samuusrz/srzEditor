@@ -26,7 +26,7 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
     canUndo, canRedo, undo, redo, snapshot,
     addClip, removeClip, resolveClipConflicts, moveClip, trimClip, splitClip,
     setClipVolume, toggleClipMute, extractAudio,
-    addText, updateText, dragTextPos, removeText, moveText, moveMulti, removeMulti,
+    addText, updateText, dragTextPos, removeText, splitText, moveText, moveMulti, removeMulti,
     setAudio, updateAudio, dragAudioPos, dragAudioKf, removeAudio,
     setPlayhead, setPlaying, setZoom, select,
   } = useEditor(initialEditorState)
@@ -72,9 +72,17 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
         if (selected?.type === 'multi') removeMulti(selected.clipIds, selected.textIds)
       }
       if (e.key === 'c' || e.key === 'C') {
-        // Cut the clip under the playhead (no selection required)
-        const clipAtPlayhead = clips.find(c => c.startAt <= playhead && playhead < c.startAt + c.duration)
-        if (clipAtPlayhead) splitClip(clipAtPlayhead.id, playhead)
+        if (selected?.type === 'text') {
+          // Cut the selected text at playhead
+          const text = texts.find(t => t.id === selected.id)
+          if (text && playhead > text.startAt && playhead < text.startAt + text.duration) {
+            splitText(text.id, playhead)
+          }
+        } else {
+          // Cut the clip under the playhead (no selection required)
+          const clipAtPlayhead = clips.find(c => c.startAt <= playhead && playhead < c.startAt + c.duration)
+          if (clipAtPlayhead) splitClip(clipAtPlayhead.id, playhead)
+        }
       }
       if (e.key === ' ') { e.preventDefault(); setPlaying(!playing) }
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') { e.preventDefault(); undo() }
@@ -82,7 +90,7 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selected, playing, clips, playhead, undo, redo, removeClip, removeText, removeAudio, removeMulti, setPlaying, splitClip])
+  }, [selected, playing, clips, texts, playhead, undo, redo, removeClip, removeText, splitText, removeAudio, removeMulti, setPlaying, splitClip])
 
   const handleAddText = () => {
     addText({
@@ -91,7 +99,7 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
       startAt: Math.max(0, playhead),
       duration: Math.max(3, totalDuration > 0 ? totalDuration : 3),
       x: 50, y: 15,
-      fontSize: 36,
+      fontSize: 21,
       color: '#ffffff',
       bold: true,
     })

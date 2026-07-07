@@ -16,6 +16,7 @@ type Action =
   | { type: 'ADD_TEXT'; text: TextOverlay }
   | { type: 'UPDATE_TEXT'; id: string; patch: Partial<TextOverlay> }  // undoable
   | { type: 'DRAG_TEXT_POS'; id: string; x: number; y: number }       // drag (not undoable)
+  | { type: 'SPLIT_TEXT'; textId: string; at: number }
   | { type: 'REMOVE_TEXT'; id: string }
   | { type: 'MOVE_TEXT'; id: string; startAt: number }          // drag (not undoable)
   | { type: 'MOVE_MULTI'; clips: Array<{ id: string; startAt: number }>; texts: Array<{ id: string; startAt: number }> }  // multi drag (not undoable)
@@ -34,7 +35,7 @@ type Action =
 const UNDOABLE = new Set([
   'ADD_CLIP', 'REMOVE_CLIP', 'SPLIT_CLIP', 'RESOLVE_CONFLICTS',
   'SET_CLIP_VOLUME', 'TOGGLE_CLIP_MUTE', 'EXTRACT_AUDIO',
-  'ADD_TEXT', 'UPDATE_TEXT', 'REMOVE_TEXT', 'REMOVE_MULTI',
+  'ADD_TEXT', 'UPDATE_TEXT', 'SPLIT_TEXT', 'REMOVE_TEXT', 'REMOVE_MULTI',
   'SET_AUDIO', 'UPDATE_AUDIO', 'REMOVE_AUDIO',
 ])
 
@@ -115,6 +116,17 @@ function editorReducer(state: EditorState, action: Action): EditorState {
       return { ...state, texts: state.texts.map(t => t.id === action.id ? { ...t, ...action.patch } : t) }
     case 'DRAG_TEXT_POS':
       return { ...state, texts: state.texts.map(t => t.id === action.id ? { ...t, x: action.x, y: action.y } : t) }
+    case 'SPLIT_TEXT': {
+      const text = state.texts.find(t => t.id === action.textId)
+      if (!text) return state
+      const offset = action.at - text.startAt
+      if (offset <= 0.05 || offset >= text.duration - 0.05) return state
+      const t1: TextOverlay = { ...text, duration: offset }
+      const t2: TextOverlay = { ...text, id: crypto.randomUUID(), startAt: action.at, duration: text.duration - offset }
+      const texts: TextOverlay[] = []
+      for (const t of state.texts) { texts.push(t.id === action.textId ? t1 : t); if (t.id === action.textId) texts.push(t2) }
+      return { ...state, texts, selected: { type: 'text', id: t2.id } }
+    }
     case 'REMOVE_TEXT':
       return { ...state, texts: state.texts.filter(t => t.id !== action.id), selected: null }
     case 'MOVE_TEXT':
@@ -249,6 +261,7 @@ export function useEditor(initialState?: EditorState) {
     addText:        useCallback((text: TextOverlay) => dispatch({ type: 'ADD_TEXT', text }), []),
     updateText:     useCallback((id: string, patch: Partial<TextOverlay>) => dispatch({ type: 'UPDATE_TEXT', id, patch }), []),
     dragTextPos:    useCallback((id: string, x: number, y: number) => dispatch({ type: 'DRAG_TEXT_POS', id, x, y }), []),
+    splitText:      useCallback((textId: string, at: number) => dispatch({ type: 'SPLIT_TEXT', textId, at }), []),
     removeText:     useCallback((id: string) => dispatch({ type: 'REMOVE_TEXT', id }), []),
     moveText:       useCallback((id: string, startAt: number) => dispatch({ type: 'MOVE_TEXT', id, startAt }), []),
     moveMulti:      useCallback((clips: Array<{id:string;startAt:number}>, texts: Array<{id:string;startAt:number}>) => dispatch({ type: 'MOVE_MULTI', clips, texts }), []),
