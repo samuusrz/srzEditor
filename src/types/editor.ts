@@ -10,6 +10,7 @@ export interface Clip {
   trimStart: number
   volume: number
   muted: boolean
+  track: number   // video track index (0 = top)
 }
 
 export interface TextOverlay {

@@ -43,6 +43,7 @@ interface Props {
   onMoveClip: (id: string, startAt: number) => void
   onTrimClip: (id: string, trimStart: number, duration: number, startAt: number) => void
   onSplitClip: (clipId: string, at: number) => void
+  onResolveConflicts: (winnerId: string) => void
   onToggleMute: (id: string) => void
   onExtractAudio: (clipId: string) => void
   onMoveText: (id: string, startAt: number) => void
@@ -56,13 +57,15 @@ interface Props {
 
 export function Timeline({
   clips, texts, audio, playhead, totalDuration, zoom, selected,
-  onSetPlayhead, onMoveClip, onTrimClip, onSplitClip, onToggleMute,
+  onSetPlayhead, onMoveClip, onTrimClip, onSplitClip, onResolveConflicts, onToggleMute,
   onExtractAudio, onMoveText, onMoveAudio, onDragAudioPos, onDragAudioKf, onSelect, onSetZoom, onSnapshot,
 }: Props) {
   const [snapLine, setSnapLine] = useState<number | null>(null)
 
-  const visibleSecs = Math.max(totalDuration + 5, 15)
-  const totalWidth  = visibleSecs * zoom
+  const visibleSecs  = Math.max(totalDuration + 5, 15)
+  const totalWidth   = visibleSecs * zoom
+  const videoTracks  = [...new Set(clips.map(c => c.track ?? 0))].sort((a, b) => a - b)
+  if (videoTracks.length === 0) videoTracks.push(0)
 
   const tickStep = zoom >= 150 ? 1 : zoom >= 70 ? 2 : 5
   const ticks: number[] = []
@@ -71,11 +74,29 @@ export function Timeline({
   const selClipId = selected?.type === 'clip' ? selected.id : null
   const isAudioSel = selected?.type === 'audio'
 
+  // ── Ctrl+scroll zoom ────────────────────────────────────────────────────
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault()
+      onSetZoom(Math.max(40, Math.min(400, zoom + (e.deltaY > 0 ? -15 : 15))))
+    }
+  }, [zoom, onSetZoom])
+
   // ── Ruler seek ──────────────────────────────────────────────────────────
   const handleRulerClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect()
     onSetPlayhead(Math.max(0, (e.clientX - rect.left) / zoom))
   }, [zoom, onSetPlayhead])
+
+  // ── Playhead drag ────────────────────────────────────────────────────────
+  const startPlayheadDrag = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    const startX = e.clientX; const startPh = playhead
+    const onMove = (ev: MouseEvent) => onSetPlayhead(Math.max(0, startPh + (ev.clientX - startX) / zoom))
+    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [playhead, zoom, onSetPlayhead])
 
   // ── Generic drag factory ─────────────────────────────────────────────────
   function makeDrag(onMove: (ev: MouseEvent) => void, onEnd?: () => void) {
@@ -92,7 +113,7 @@ export function Timeline({
     }
   }
 
-  // ── Clip body drag with snapping + push-on-overlap ───────────────────────
+  // ── Clip body drag with snapping + multi-track conflict resolve ──────────
   const startClipDrag = (e: React.MouseEvent, clip: Clip) => {
     onSelect({ type: 'clip', id: clip.id })
     const startX = e.clientX; const orig = clip.startAt
@@ -100,9 +121,9 @@ export function Timeline({
       const raw    = Math.max(0, orig + (ev.clientX - startX) / zoom)
       const thresh = 8 / zoom  // 8px snap radius
 
-      // Snap points: timeline start + edges of every other clip
-      const others  = clips.filter(c => c.id !== clip.id)
-      const snapPts = [0, ...others.flatMap(c => [c.startAt, c.startAt + c.duration])]
+      // Snap to edges of same-track clips and t=0
+      const sameTracks = clips.filter(c => c.id !== clip.id && (c.track ?? 0) === (clip.track ?? 0))
+      const snapPts = [0, ...sameTracks.flatMap(c => [c.startAt, c.startAt + c.duration])]
 
       let snapped    = raw
       let snapTarget: number | null = null
@@ -115,25 +136,13 @@ export function Timeline({
         }
       }
 
-      // Push-on-overlap: if snapped position overlaps another clip, push to before/after it
-      for (const other of others) {
-        const aStart = snapped;              const aEnd = snapped + clip.duration
-        const bStart = other.startAt;        const bEnd = other.startAt + other.duration
-        if (aStart < bEnd && aEnd > bStart) {
-          if (snapped + clip.duration / 2 < bStart + other.duration / 2) {
-            snapped    = Math.max(0, bStart - clip.duration)
-            snapTarget = bStart
-          } else {
-            snapped    = bEnd
-            snapTarget = bEnd
-          }
-          break
-        }
-      }
-
       setSnapLine(snapTarget)
       onMoveClip(clip.id, Math.max(0, snapped))
-    }, () => { setSnapLine(null); onSnapshot() })(e)
+    }, () => {
+      setSnapLine(null)
+      onResolveConflicts(clip.id)  // move overlapping same-track clips to next track
+      onSnapshot()
+    })(e)
   }
 
   // ── Clip trim ────────────────────────────────────────────────────────────
@@ -222,8 +231,10 @@ export function Timeline({
     return pts
   }
 
+  const trackAreaHeight = RULER_H + videoTracks.length * TRACK_H + TRACK_H + TRACK_H  // ruler + videos + text + audio
+
   return (
-    <div className="h-[220px] flex-none bg-zinc-900 border-t border-zinc-800 flex flex-col select-none">
+    <div className="flex-none bg-zinc-900 border-t border-zinc-800 flex flex-col select-none" style={{ height: Math.min(320, 48 + trackAreaHeight) }} onWheel={handleWheel}>
       {/* Controls */}
       <div className="h-9 flex items-center gap-1 px-3 border-b border-zinc-800 flex-none overflow-x-auto">
         <button onClick={() => onSetZoom(zoom - 20)} className="text-zinc-500 hover:text-zinc-200 cursor-pointer p-1"><ZoomOut size={13} /></button>
@@ -262,7 +273,7 @@ export function Timeline({
         {/* Labels */}
         <div className="flex-none border-r border-zinc-800" style={{ width: LABEL_W }}>
           <div style={{ height: RULER_H }} />
-          <TrackLabel>Vídeo</TrackLabel>
+          {videoTracks.map(t => <TrackLabel key={t}>Vídeo {videoTracks.length > 1 ? t + 1 : ''}</TrackLabel>)}
           <TrackLabel>Texto</TrackLabel>
           <TrackLabel>Audio</TrackLabel>
         </div>
@@ -282,9 +293,12 @@ export function Timeline({
             </div>
 
             {/* Playhead */}
-            <div className="absolute top-0 bottom-0 z-20 pointer-events-none" style={{ left: playhead * zoom }}>
-              <div className="w-2.5 h-2.5 bg-red-500 rounded-full -ml-1 mt-4" />
-              <div className="w-px h-full bg-red-500/80 -ml-px" />
+            <div className="absolute top-0 bottom-0 z-20" style={{ left: playhead * zoom }}>
+              <div
+                className="w-3 h-3 bg-red-500 rounded-full -ml-1.5 mt-3.5 cursor-ew-resize"
+                onMouseDown={startPlayheadDrag}
+              />
+              <div className="w-px h-full bg-red-500/80 -ml-px pointer-events-none" />
             </div>
 
             {/* Snap guide */}
@@ -292,29 +306,32 @@ export function Timeline({
               <div className="absolute top-0 bottom-0 z-30 pointer-events-none" style={{ left: snapLine * zoom, width: 1, background: 'rgba(250,204,21,0.9)' }} />
             )}
 
-            {/* ── Video track ── */}
-            <div className="relative" style={{ height: TRACK_H }}>
-              {clips.map((clip, i) => {
-                const w = Math.max(4, clip.duration * zoom)
-                return (
-                  <div
-                    key={clip.id}
-                    className={`absolute top-1 bottom-1 rounded-md overflow-hidden border-2 transition-[border-color] ${CLIP_COLORS[i % CLIP_COLORS.length]} ${clip.id === selClipId ? 'border-white' : 'border-transparent'}`}
-                    style={{ left: clip.startAt * zoom, width: w }}
-                    onClick={() => onSelect({ type: 'clip', id: clip.id })}
-                  >
-                    {clip.thumbnail && <img src={clip.thumbnail} className="absolute inset-0 w-full h-full object-cover opacity-25" alt="" />}
-                    <div className="absolute inset-x-3 inset-y-0 cursor-grab active:cursor-grabbing flex items-center gap-1" onMouseDown={e => startClipDrag(e, clip)}>
-                      {clip.muted && <VolumeX size={9} className="text-white/60 flex-none" />}
-                      <span className="text-[10px] text-white font-medium truncate flex-1">{clip.name}</span>
-                      <span className="text-[10px] text-white/50 flex-none">{clip.duration.toFixed(1)}s</span>
+            {/* ── Video tracks (one row per track) ── */}
+            {videoTracks.map(trackIdx => (
+              <div key={trackIdx} className="relative" style={{ height: TRACK_H }}>
+                {clips.filter(c => (c.track ?? 0) === trackIdx).map(clip => {
+                  const colorIdx = clips.indexOf(clip)
+                  const w = Math.max(4, clip.duration * zoom)
+                  return (
+                    <div
+                      key={clip.id}
+                      className={`absolute top-1 bottom-1 rounded-md overflow-hidden border-2 transition-[border-color] ${CLIP_COLORS[colorIdx % CLIP_COLORS.length]} ${clip.id === selClipId ? 'border-white' : 'border-transparent'}`}
+                      style={{ left: clip.startAt * zoom, width: w }}
+                      onClick={() => onSelect({ type: 'clip', id: clip.id })}
+                    >
+                      {clip.thumbnail && <img src={clip.thumbnail} className="absolute inset-0 w-full h-full object-cover opacity-25" alt="" />}
+                      <div className="absolute inset-x-3 inset-y-0 cursor-grab active:cursor-grabbing flex items-center gap-1" onMouseDown={e => startClipDrag(e, clip)}>
+                        {clip.muted && <VolumeX size={9} className="text-white/60 flex-none" />}
+                        <span className="text-[10px] text-white font-medium truncate flex-1">{clip.name}</span>
+                        <span className="text-[10px] text-white/50 flex-none">{clip.duration.toFixed(1)}s</span>
+                      </div>
+                      <div className="absolute left-0 top-0 bottom-0 w-2.5 cursor-w-resize hover:bg-white/25 z-10" onMouseDown={e => startTrimDrag(e, clip, 'left')} />
+                      <div className="absolute right-0 top-0 bottom-0 w-2.5 cursor-e-resize hover:bg-white/25 z-10" onMouseDown={e => startTrimDrag(e, clip, 'right')} />
                     </div>
-                    <div className="absolute left-0 top-0 bottom-0 w-2.5 cursor-w-resize hover:bg-white/25 z-10" onMouseDown={e => startTrimDrag(e, clip, 'left')} />
-                    <div className="absolute right-0 top-0 bottom-0 w-2.5 cursor-e-resize hover:bg-white/25 z-10" onMouseDown={e => startTrimDrag(e, clip, 'right')} />
-                  </div>
-                )
-              })}
-            </div>
+                  )
+                })}
+              </div>
+            ))}
 
             {/* ── Text track ── */}
             <div className="relative" style={{ height: TRACK_H }}>

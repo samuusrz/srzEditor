@@ -8,6 +8,7 @@ type Action =
   | { type: 'REMOVE_CLIP'; id: string }
   | { type: 'MOVE_CLIP'; id: string; startAt: number }          // drag (not undoable)
   | { type: 'TRIM_CLIP'; id: string; trimStart: number; duration: number; startAt: number } // drag
+  | { type: 'RESOLVE_CONFLICTS'; winnerId: string }             // resolve track overlaps after drag
   | { type: 'SPLIT_CLIP'; clipId: string; at: number }
   | { type: 'SET_CLIP_VOLUME'; id: string; volume: number }
   | { type: 'TOGGLE_CLIP_MUTE'; id: string }
@@ -29,7 +30,7 @@ type Action =
 
 // Only these actions are saved to the undo history
 const UNDOABLE = new Set([
-  'ADD_CLIP', 'REMOVE_CLIP', 'SPLIT_CLIP',
+  'ADD_CLIP', 'REMOVE_CLIP', 'SPLIT_CLIP', 'RESOLVE_CONFLICTS',
   'SET_CLIP_VOLUME', 'TOGGLE_CLIP_MUTE', 'EXTRACT_AUDIO',
   'ADD_TEXT', 'UPDATE_TEXT', 'REMOVE_TEXT',
   'SET_AUDIO', 'UPDATE_AUDIO', 'REMOVE_AUDIO',
@@ -46,7 +47,34 @@ function editorReducer(state: EditorState, action: Action): EditorState {
   switch (action.type) {
     case 'ADD_CLIP': {
       const end = state.clips.reduce((m, c) => Math.max(m, c.startAt + c.duration), 0)
-      return { ...state, clips: [...state.clips, { ...action.clip, startAt: end }] }
+      return { ...state, clips: [...state.clips, { ...action.clip, startAt: end, track: 0 }] }
+    }
+    case 'RESOLVE_CONFLICTS': {
+      // Winner clip keeps its track; any same-track clip that overlaps it moves to next free track
+      const winner = state.clips.find(c => c.id === action.winnerId)
+      if (!winner) return state
+      let clips = state.clips
+      const wt = winner.track
+      const conflicts = clips.filter(c =>
+        c.id !== winner.id &&
+        c.track === wt &&
+        c.startAt < winner.startAt + winner.duration &&
+        c.startAt + c.duration > winner.startAt
+      )
+      for (const conflict of conflicts) {
+        // Find lowest track > wt with no overlap for this clip
+        let newTrack = wt + 1
+        while (true) {
+          const occupied = clips.filter(c => c.id !== conflict.id && c.track === newTrack)
+          const hasOverlap = occupied.some(c =>
+            c.startAt < conflict.startAt + conflict.duration && c.startAt + c.duration > conflict.startAt
+          )
+          if (!hasOverlap) break
+          newTrack++
+        }
+        clips = clips.map(c => c.id === conflict.id ? { ...c, track: newTrack } : c)
+      }
+      return { ...state, clips }
     }
     case 'REMOVE_CLIP':
       return { ...state, clips: state.clips.filter(c => c.id !== action.id), selected: null }
@@ -193,9 +221,10 @@ export function useEditor(initialState?: EditorState) {
     undo:           useCallback(() => dispatch({ type: 'UNDO' }), []),
     redo:           useCallback(() => dispatch({ type: 'REDO' }), []),
     snapshot:       useCallback(() => dispatch({ type: 'SNAPSHOT' }), []),
-    addClip:        useCallback((clip: Clip) => dispatch({ type: 'ADD_CLIP', clip }), []),
-    removeClip:     useCallback((id: string) => dispatch({ type: 'REMOVE_CLIP', id }), []),
-    moveClip:       useCallback((id: string, startAt: number) => dispatch({ type: 'MOVE_CLIP', id, startAt }), []),
+    addClip:               useCallback((clip: Clip) => dispatch({ type: 'ADD_CLIP', clip }), []),
+    removeClip:            useCallback((id: string) => dispatch({ type: 'REMOVE_CLIP', id }), []),
+    resolveClipConflicts:  useCallback((winnerId: string) => dispatch({ type: 'RESOLVE_CONFLICTS', winnerId }), []),
+    moveClip:              useCallback((id: string, startAt: number) => dispatch({ type: 'MOVE_CLIP', id, startAt }), []),
     trimClip:       useCallback((id: string, trimStart: number, duration: number, startAt: number) => dispatch({ type: 'TRIM_CLIP', id, trimStart, duration, startAt }), []),
     splitClip:      useCallback((clipId: string, at: number) => dispatch({ type: 'SPLIT_CLIP', clipId, at }), []),
     setClipVolume:  useCallback((id: string, volume: number) => dispatch({ type: 'SET_CLIP_VOLUME', id, volume }), []),

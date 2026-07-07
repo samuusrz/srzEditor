@@ -82,33 +82,30 @@ export function PreviewPanel({
     }
   }, [activeClip?.id, playhead, playing])
 
-  // ── Sync audio track ────────────────────────────────────────────────────
+  // ── Audio src change ─────────────────────────────────────────────────────
   useEffect(() => {
     const aud = audioRef.current
-    if (!aud || !audio) { audioRef.current?.pause(); return }
-
-    const audioTime = playhead - audio.startAt
-
+    if (!aud) return
+    if (!audio) { aud.pause(); aud.src = ''; prevAudioUrl.current = null; return }
     if (prevAudioUrl.current !== audio.localUrl) {
       prevAudioUrl.current = audio.localUrl
       aud.src = audio.localUrl
       aud.load()
     }
+  }, [audio?.localUrl])
 
-    if (audioTime < 0 || audioTime >= audio.duration) {
+  // ── Audio seek + volume when PAUSED (scrubbing) ──────────────────────────
+  useEffect(() => {
+    const aud = audioRef.current
+    if (!aud || !audio || playing) return
+    const audioTime = playhead - audio.startAt
+    if (audioTime >= 0 && audioTime < audio.duration) {
+      const baseVol = getVolumeAtTime(playhead, audio.keyframes, audio.volume)
+      aud.volume = calcFadeVolume(audioTime, audio.duration, audio.fadeIn, audio.fadeOut, baseVol)
+      if (Math.abs(aud.currentTime - audioTime) > 0.05) aud.currentTime = audioTime
       aud.pause()
-      return
-    }
-
-    const baseVol = getVolumeAtTime(playhead, audio.keyframes, audio.volume)
-    aud.volume = calcFadeVolume(audioTime, audio.duration, audio.fadeIn, audio.fadeOut, baseVol)
-
-    if (!playing) {
-      aud.pause()
-      if (Math.abs(aud.currentTime - audioTime) > 0.15) aud.currentTime = audioTime
     } else {
-      if (Math.abs(aud.currentTime - audioTime) > 0.3) aud.currentTime = audioTime
-      aud.play().catch(() => {})
+      aud.pause()
     }
   }, [audio, playhead, playing])
 
@@ -125,7 +122,7 @@ export function PreviewPanel({
       lastTimeRef.current = now
       const next = playheadRef.current + dt
 
-      // Update audio volume every frame using latest keyframes via ref
+      // Audio: volume via keyframes (every frame, using ref for latest state)
       const aud = audioRef.current
       const at  = audioTrackRef.current
       if (aud && at) {
@@ -133,6 +130,8 @@ export function PreviewPanel({
         if (audioTime >= 0 && audioTime < at.duration) {
           const baseVol = getVolumeAtTime(next, at.keyframes, at.volume)
           aud.volume = calcFadeVolume(audioTime, at.duration, at.fadeIn, at.fadeOut, baseVol)
+          // Re-sync if drift exceeds 0.2s
+          if (Math.abs(aud.currentTime - audioTime) > 0.2) aud.currentTime = audioTime
           if (aud.paused) aud.play().catch(() => {})
         } else {
           if (!aud.paused) aud.pause()
@@ -228,7 +227,7 @@ export function PreviewPanel({
                   display: 'block',
                   fontSize: t.fontSize,
                   color: t.color,
-                  fontWeight: 900,
+                  fontWeight: 500,
                   fontFamily: "'TikTok Sans', sans-serif",
                   WebkitTextStroke: '4px #000',
                   paintOrder: 'stroke fill',

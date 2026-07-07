@@ -24,7 +24,7 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
   const {
     state, totalDuration,
     canUndo, canRedo, undo, redo, snapshot,
-    addClip, removeClip, moveClip, trimClip, splitClip,
+    addClip, removeClip, resolveClipConflicts, moveClip, trimClip, splitClip,
     setClipVolume, toggleClipMute, extractAudio,
     addText, updateText, dragTextPos, removeText, moveText,
     setAudio, updateAudio, dragAudioPos, dragAudioKf, removeAudio,
@@ -156,6 +156,7 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
         playhead={playhead} totalDuration={totalDuration} zoom={zoom} selected={selected}
         onSetPlayhead={setPlayhead}
         onMoveClip={moveClip} onTrimClip={trimClip} onSplitClip={splitClip}
+        onResolveConflicts={resolveClipConflicts}
         onToggleMute={toggleClipMute} onExtractAudio={extractAudio}
         onMoveText={moveText} onMoveAudio={updateAudio}
         onDragAudioPos={dragAudioPos} onDragAudioKf={dragAudioKf}
