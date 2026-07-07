@@ -187,14 +187,8 @@ export function Timeline({
 
     const startX = e.clientX
     const startY = e.clientY
-    const orig   = clip.startAt
+    const orig      = clip.startAt
     const origTrack = clip.track ?? 0
-
-    // Track area top (in viewport coords): scroll container top + ruler height
-    const scrollEl = scrollRef.current
-    const scrollTop = scrollEl ? scrollEl.getBoundingClientRect().top : 0
-    const trackAreaTop = scrollTop + RULER_H
-
     let hasDragged = false
     let dragTrack  = origTrack
 
@@ -203,17 +197,30 @@ export function Timeline({
       const delta = (ev.clientX - startX) / zoom
 
       if (isMultiDrag && selected?.type === 'multi') {
+        // Snap the anchor clip against clips NOT in the selection, then apply same delta to all
+        const raw = Math.max(0, orig + delta)
+        const thresh = 8 / zoom
+        const otherClips = clips.filter(c => !selected.clipIds.includes(c.id) && (c.track ?? 0) === (clip.track ?? 0))
+        const snapPts = [0, ...otherClips.flatMap(c => [c.startAt, c.startAt + c.duration])]
+        let snapped = raw
+        let snapTarget: number | null = null
+        for (const sp of snapPts) {
+          if (Math.abs(raw - sp) < thresh) { snapped = sp; snapTarget = sp; break }
+          if (Math.abs(raw + clip.duration - sp) < thresh) { snapped = sp - clip.duration; snapTarget = sp; break }
+        }
+        const snappedDelta = snapped - orig
+        setSnapLine(snapTarget)
         const clipMoves = selected.clipIds.map(id => ({
-          id, startAt: Math.max(0, (origClipPositions[id] ?? 0) + delta),
+          id, startAt: Math.max(0, (origClipPositions[id] ?? 0) + snappedDelta),
         }))
         const textMoves = selected.textIds.map(id => ({
-          id, startAt: Math.max(0, (origTextPositions[id] ?? 0) + delta),
+          id, startAt: Math.max(0, (origTextPositions[id] ?? 0) + snappedDelta),
         }))
         onMoveMulti(clipMoves, textMoves)
       } else {
-        // Compute target track from vertical mouse position
+        // Track changes only when mouse moves ≥ TRACK_H/2 vertically (prevents accidental track switches)
         const maxExisting = clips.reduce((m, c) => Math.max(m, c.track ?? 0), 0)
-        dragTrack = Math.max(0, Math.min(maxExisting + 1, Math.floor((ev.clientY - trackAreaTop) / TRACK_H)))
+        dragTrack = Math.max(0, Math.min(maxExisting + 1, origTrack + Math.round((ev.clientY - startY) / TRACK_H)))
 
         const raw    = Math.max(0, orig + delta)
         const thresh = 8 / zoom
