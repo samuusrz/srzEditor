@@ -40,7 +40,7 @@ interface Props {
   zoom: number
   selected: SelectedItem
   onSetPlayhead: (t: number) => void
-  onMoveClip: (id: string, startAt: number) => void
+  onMoveClip: (id: string, startAt: number, track?: number) => void
   onTrimClip: (id: string, trimStart: number, duration: number, startAt: number) => void
   onSplitClip: (clipId: string, at: number) => void
   onResolveConflicts: (winnerId: string) => void
@@ -186,11 +186,20 @@ export function Timeline({
     }
 
     const startX = e.clientX
+    const startY = e.clientY
     const orig   = clip.startAt
+    const origTrack = clip.track ?? 0
+
+    // Track area top (in viewport coords): scroll container top + ruler height
+    const scrollEl = scrollRef.current
+    const scrollTop = scrollEl ? scrollEl.getBoundingClientRect().top : 0
+    const trackAreaTop = scrollTop + RULER_H
+
     let hasDragged = false
+    let dragTrack  = origTrack
 
     const onMove = (ev: MouseEvent) => {
-      if (!hasDragged && Math.abs(ev.clientX - startX) > 3) hasDragged = true
+      if (!hasDragged && (Math.abs(ev.clientX - startX) > 3 || Math.abs(ev.clientY - startY) > 5)) hasDragged = true
       const delta = (ev.clientX - startX) / zoom
 
       if (isMultiDrag && selected?.type === 'multi') {
@@ -202,9 +211,13 @@ export function Timeline({
         }))
         onMoveMulti(clipMoves, textMoves)
       } else {
+        // Compute target track from vertical mouse position
+        const maxExisting = clips.reduce((m, c) => Math.max(m, c.track ?? 0), 0)
+        dragTrack = Math.max(0, Math.min(maxExisting + 1, Math.floor((ev.clientY - trackAreaTop) / TRACK_H)))
+
         const raw    = Math.max(0, orig + delta)
         const thresh = 8 / zoom
-        const sameTracks = clips.filter(c => c.id !== clip.id && (c.track ?? 0) === (clip.track ?? 0))
+        const sameTracks = clips.filter(c => c.id !== clip.id && (c.track ?? 0) === dragTrack)
         const snapPts = [0, ...sameTracks.flatMap(c => [c.startAt, c.startAt + c.duration])]
         let snapped    = raw
         let snapTarget: number | null = null
@@ -213,7 +226,7 @@ export function Timeline({
           if (Math.abs(raw + clip.duration - sp) < thresh) { snapped = sp - clip.duration; snapTarget = sp; break }
         }
         setSnapLine(snapTarget)
-        onMoveClip(clip.id, Math.max(0, snapped))
+        onMoveClip(clip.id, Math.max(0, snapped), dragTrack)
       }
     }
 
@@ -400,8 +413,8 @@ export function Timeline({
       const bx0 = Math.min(x0, x1)
       const bx1 = Math.max(x0, x1)
 
-      // Only select if band has meaningful width
       if (bx1 - bx0 > 5) {
+        // Meaningful band — select items within time range
         const t0 = bx0 / zoom
         const t1 = bx1 / zoom
         const clipIds = clips.filter(c => c.startAt < t1 && c.startAt + c.duration > t0).map(c => c.id)
@@ -413,6 +426,9 @@ export function Timeline({
         } else if (textIds.length === 1 && clipIds.length === 0) {
           onSelect({ type: 'text', id: textIds[0] })
         }
+      } else {
+        // Just a click on empty space — deselect everything
+        onSelect(null)
       }
 
       setBand(null)

@@ -6,7 +6,7 @@ import type { Clip, TextOverlay, AudioTrack, SelectedItem, EditorState, VolumeKe
 type Action =
   | { type: 'ADD_CLIP'; clip: Clip }
   | { type: 'REMOVE_CLIP'; id: string }
-  | { type: 'MOVE_CLIP'; id: string; startAt: number }          // drag (not undoable)
+  | { type: 'MOVE_CLIP'; id: string; startAt: number; track?: number }  // drag (not undoable)
   | { type: 'TRIM_CLIP'; id: string; trimStart: number; duration: number; startAt: number } // drag
   | { type: 'RESOLVE_CONFLICTS'; winnerId: string }             // resolve track overlaps after drag
   | { type: 'SPLIT_CLIP'; clipId: string; at: number }
@@ -81,7 +81,7 @@ function editorReducer(state: EditorState, action: Action): EditorState {
     case 'REMOVE_CLIP':
       return { ...state, clips: state.clips.filter(c => c.id !== action.id), selected: null }
     case 'MOVE_CLIP':
-      return { ...state, clips: state.clips.map(c => c.id === action.id ? { ...c, startAt: Math.max(0, action.startAt) } : c) }
+      return { ...state, clips: state.clips.map(c => c.id === action.id ? { ...c, startAt: Math.max(0, action.startAt), ...(action.track !== undefined && { track: action.track }) } : c) }
     case 'TRIM_CLIP':
       return { ...state, clips: state.clips.map(c => c.id === action.id ? { ...c, trimStart: action.trimStart, duration: action.duration, startAt: action.startAt } : c) }
     case 'SPLIT_CLIP': {
@@ -240,7 +240,7 @@ export function useEditor(initialState?: EditorState) {
     addClip:               useCallback((clip: Clip) => dispatch({ type: 'ADD_CLIP', clip }), []),
     removeClip:            useCallback((id: string) => dispatch({ type: 'REMOVE_CLIP', id }), []),
     resolveClipConflicts:  useCallback((winnerId: string) => dispatch({ type: 'RESOLVE_CONFLICTS', winnerId }), []),
-    moveClip:              useCallback((id: string, startAt: number) => dispatch({ type: 'MOVE_CLIP', id, startAt }), []),
+    moveClip:              useCallback((id: string, startAt: number, track?: number) => dispatch({ type: 'MOVE_CLIP', id, startAt, track }), []),
     trimClip:       useCallback((id: string, trimStart: number, duration: number, startAt: number) => dispatch({ type: 'TRIM_CLIP', id, trimStart, duration, startAt }), []),
     splitClip:      useCallback((clipId: string, at: number) => dispatch({ type: 'SPLIT_CLIP', clipId, at }), []),
     setClipVolume:  useCallback((id: string, volume: number) => dispatch({ type: 'SET_CLIP_VOLUME', id, volume }), []),
