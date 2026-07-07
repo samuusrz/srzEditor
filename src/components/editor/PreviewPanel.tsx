@@ -2,7 +2,7 @@ import { useRef, useEffect, useCallback, useState } from 'react'
 import { Play, Pause, SkipBack, Film, Maximize2 } from 'lucide-react'
 import type { Clip, TextOverlay, AudioTrack, SelectedItem } from '../../types/editor'
 import { getVolumeAtTime } from './Timeline'
-import { tokenizeSegments, appleEmojiUrl } from '../../lib/appleEmoji'
+import { tokenizeSegments, appleEmojiUrl, onEmojiImgError } from '../../lib/appleEmoji'
 
 interface Props {
   clips: Clip[]
@@ -243,10 +243,11 @@ export function PreviewPanel({
                       {segs.map((seg, si) =>
                         seg.type === 'emoji' ? (
                           <img
-                            key={si}
+                            key={`emoji-${si}-${seg.content}`}
                             src={appleEmojiUrl(seg.content)}
                             alt={seg.content}
                             draggable={false}
+                            onError={e => onEmojiImgError(e, seg.content)}
                             style={{ height: t.fontSize * 1.15, width: t.fontSize * 1.15, verticalAlign: 'middle', display: 'inline-block' }}
                           />
                         ) : (

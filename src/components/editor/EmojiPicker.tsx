@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { appleEmojiUrl } from '../../lib/appleEmoji'
+import { appleEmojiUrl, onEmojiImgError } from '../../lib/appleEmoji'
 
 // ── Emoji data ─────────────────────────────────────────────────────────────────
 
@@ -167,7 +167,7 @@ export function EmojiPicker({ onSelect }: Props) {
               catIdx === i ? 'bg-zinc-700' : 'hover:bg-zinc-800'
             }`}
           >
-            <img src={appleEmojiUrl(c.icon)} alt={c.label} style={{ width: 18, height: 18 }} />
+            <img src={appleEmojiUrl(c.icon)} alt={c.label} style={{ width: 18, height: 18 }} onError={e => onEmojiImgError(e, c.icon)} />
           </button>
         ))}
       </div>
@@ -194,6 +194,7 @@ export function EmojiPicker({ onSelect }: Props) {
                     alt={emoji}
                     loading="lazy"
                     style={{ width: 22, height: 22 }}
+                    onError={e => onEmojiImgError(e, emoji)}
                   />
                 </button>
               ))}

@@ -149,10 +149,6 @@ export async function renderVideoInBrowser(
   // ── 5. Build composite + audio filter ─────────────────────────────────────
   onProgress({ step: 'Aplicando textos y audio…', pct: 50 })
 
-  ffmpeg.on('progress', ({ progress }) => {
-    onProgress({ step: 'Codificando…', pct: 50 + Math.round(progress * 45) })
-  })
-
   const inputs: string[] = ['-i', concatResult]
   // Add text PNG inputs (each is a separate -loop 1 -i input)
   const tImgOffset = 1  // input index for first text PNG (after concatResult = input 0)
@@ -214,7 +210,20 @@ export async function renderVideoInBrowser(
     'output.mp4',
   )
 
-  const exitCode = await ffmpeg.exec(cmd)
+  // Register progress listener only for the final encoding step
+  const onFfmpegProgress = ({ progress }: { progress: number }) => {
+    const p = Math.min(1, Math.max(0, progress))
+    onProgress({ step: 'Codificando…', pct: 50 + Math.round(p * 45) })
+  }
+  ffmpeg.on('progress', onFfmpegProgress)
+
+  let exitCode: number
+  try {
+    exitCode = await ffmpeg.exec(cmd)
+  } finally {
+    ffmpeg.off('progress', onFfmpegProgress)
+  }
+
   if (exitCode !== 0) throw new Error(`FFmpeg falló durante la codificación final (código ${exitCode}).`)
 
   // ── 6. Read result ─────────────────────────────────────────────────────────

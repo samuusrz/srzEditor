@@ -25,7 +25,7 @@ export function PropertiesPanel({
 }: Props) {
   if (!selected) {
     return (
-      <div className="w-60 flex-none bg-zinc-950 border-l border-zinc-800 flex items-center justify-center">
+      <div className="w-80 flex-none bg-zinc-950 border-l border-zinc-800 flex items-center justify-center">
         <p className="text-xs text-zinc-600 text-center px-4">Selecciona un elemento para editar sus propiedades</p>
       </div>
     )
@@ -35,7 +35,7 @@ export function PropertiesPanel({
   const text = selected.type === 'text' ? texts.find(t => t.id === selected.id) : null
 
   return (
-    <div className="w-60 flex-none bg-zinc-950 border-l border-zinc-800 flex flex-col overflow-y-auto">
+    <div className="w-80 flex-none bg-zinc-950 border-l border-zinc-800 flex flex-col overflow-y-auto">
       <div className="p-4 border-b border-zinc-800">
         <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
           {selected.type === 'clip' ? 'Clip' : selected.type === 'text' ? 'Texto' : 'Audio'}

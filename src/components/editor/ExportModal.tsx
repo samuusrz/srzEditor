@@ -93,7 +93,7 @@ export function ExportModal({ clips, texts, audio, onClose }: Props) {
               <div className="w-full bg-zinc-800 rounded-full h-2">
                 <div
                   className="bg-violet-500 h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${pct}%` }}
+                  style={{ width: `${Math.min(100, pct)}%` }}
                 />
               </div>
               <p className="text-xs text-zinc-600">Puede tardar unos minutos. No cierres la pestaña.</p>
