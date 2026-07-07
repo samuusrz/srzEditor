@@ -169,7 +169,7 @@ function TextProps({
     // Restore cursor after React re-render
     requestAnimationFrame(() => {
       el.focus()
-      const pos = start + [...emoji].length // grapheme-safe cursor advance
+      const pos = start + emoji.length // advance by code units (not code points — surrogates matter)
       el.setSelectionRange(pos, pos)
     })
   }

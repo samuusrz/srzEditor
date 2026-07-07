@@ -149,9 +149,8 @@ export function onEmojiImgError(
   emoji: string,
 ): void {
   const el = e.target as HTMLImageElement
+  if (el.dataset.emojiRetried) return  // already tried fallback — give up, avoid infinite loop
+  el.dataset.emojiRetried = '1'
   const [primary, fallback] = appleEmojiUrls(emoji)
-  if (el.src.endsWith(primary.split('/').pop()!)) {
-    el.src = fallback  // try the other variant
-  }
-  // If fallback also fails, el keeps showing broken — nothing we can do about it
+  if (fallback !== primary) el.src = fallback
 }
