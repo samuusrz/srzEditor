@@ -2,6 +2,7 @@ import { useRef, useEffect, useCallback, useState } from 'react'
 import { Play, Pause, SkipBack, Film, Maximize2 } from 'lucide-react'
 import type { Clip, TextOverlay, AudioTrack, SelectedItem } from '../../types/editor'
 import { getVolumeAtTime } from './Timeline'
+import { tokenizeSegments, appleEmojiUrl } from '../../lib/appleEmoji'
 
 interface Props {
   clips: Clip[]
@@ -225,6 +226,7 @@ export function PreviewPanel({
         {/* Text overlays */}
         {activeTexts.map(t => {
           const isSelected = t.id === selTextId
+          const lines = t.content.split('\n')
           return (
             <div
               key={t.id}
@@ -233,22 +235,41 @@ export function PreviewPanel({
               onMouseDown={e => startTextDrag(e, t)}
               onClick={e => { e.stopPropagation(); onSelect({ type: 'text', id: t.id }) }}
             >
-              <span
-                style={{
-                  display: 'block',
-                  fontSize: t.fontSize,
-                  color: t.color,
-                  fontWeight: 500,
-                  fontFamily: "'TikTok Sans', sans-serif",
-                  WebkitTextStroke: '4px #000',
-                  paintOrder: 'stroke fill',
-                  whiteSpace: 'pre',
-                  textAlign: 'center',
-                  lineHeight: 1.2,
-                }}
-              >
-                {t.content}
-              </span>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.2 }}>
+                {lines.map((line, li) => {
+                  const segs = tokenizeSegments(line)
+                  return (
+                    <div key={li} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {segs.map((seg, si) =>
+                        seg.type === 'emoji' ? (
+                          <img
+                            key={si}
+                            src={appleEmojiUrl(seg.content)}
+                            alt={seg.content}
+                            draggable={false}
+                            style={{ height: t.fontSize * 1.15, width: t.fontSize * 1.15, verticalAlign: 'middle', display: 'inline-block' }}
+                          />
+                        ) : (
+                          <span
+                            key={si}
+                            style={{
+                              fontSize: t.fontSize,
+                              color: t.color,
+                              fontWeight: t.bold ? 'bold' : 500,
+                              fontFamily: "'TikTok Sans', sans-serif",
+                              WebkitTextStroke: '4px #000',
+                              paintOrder: 'stroke fill',
+                              whiteSpace: 'pre',
+                            }}
+                          >
+                            {seg.content}
+                          </span>
+                        )
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
               {isSelected && (
                 <div
                   className="absolute -bottom-2 -right-2 w-4 h-4 bg-violet-500 rounded-full border-2 border-white cursor-se-resize z-10"

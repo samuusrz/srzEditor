@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { appleEmojiUrl } from '../../lib/appleEmoji'
 
 // ── Emoji data ─────────────────────────────────────────────────────────────────
 
@@ -162,11 +163,11 @@ export function EmojiPicker({ onSelect }: Props) {
             key={i}
             onClick={() => setCatIdx(i)}
             title={c.label}
-            className={`flex-none px-2 py-1.5 text-base transition-colors cursor-pointer ${
+            className={`flex-none px-2 py-1.5 flex items-center justify-center transition-colors cursor-pointer ${
               catIdx === i ? 'bg-zinc-700' : 'hover:bg-zinc-800'
             }`}
           >
-            {c.icon}
+            <img src={appleEmojiUrl(c.icon)} alt={c.label} style={{ width: 18, height: 18 }} />
           </button>
         ))}
       </div>
@@ -185,10 +186,15 @@ export function EmojiPicker({ onSelect }: Props) {
                 <button
                   key={`${si}-${ei}`}
                   onClick={() => onSelect(emoji)}
-                  className="text-xl p-1 hover:bg-zinc-700 rounded transition-colors cursor-pointer leading-none"
+                  className="p-1 hover:bg-zinc-700 rounded transition-colors cursor-pointer flex items-center justify-center"
                   title={emoji}
                 >
-                  {emoji}
+                  <img
+                    src={appleEmojiUrl(emoji)}
+                    alt={emoji}
+                    loading="lazy"
+                    style={{ width: 22, height: 22 }}
+                  />
                 </button>
               ))}
             </div>
