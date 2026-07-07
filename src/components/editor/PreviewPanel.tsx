@@ -1,5 +1,5 @@
 import { useRef, useEffect, useCallback, useState } from 'react'
-import { Play, Pause, SkipBack, Film } from 'lucide-react'
+import { Play, Pause, SkipBack, Film, Maximize2 } from 'lucide-react'
 import type { Clip, TextOverlay, AudioTrack, SelectedItem } from '../../types/editor'
 import { getVolumeAtTime } from './Timeline'
 
@@ -282,6 +282,14 @@ export function PreviewPanel({
         <span className="text-xs font-mono text-zinc-400 tabular-nums">
           {fmt(playhead)} / {fmt(totalDuration)}
         </span>
+        <button
+          onClick={() => previewRef.current?.requestFullscreen?.()}
+          disabled={clips.length === 0}
+          className="text-zinc-500 hover:text-zinc-200 transition-colors disabled:opacity-30 cursor-pointer ml-1"
+          title="Pantalla completa"
+        >
+          <Maximize2 size={15} />
+        </button>
       </div>
     </div>
   )

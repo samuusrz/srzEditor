@@ -71,13 +71,18 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
         if (selected?.type === 'audio') removeAudio()
         if (selected?.type === 'multi') removeMulti(selected.clipIds, selected.textIds)
       }
+      if (e.key === 'c' || e.key === 'C') {
+        // Cut the clip under the playhead (no selection required)
+        const clipAtPlayhead = clips.find(c => c.startAt <= playhead && playhead < c.startAt + c.duration)
+        if (clipAtPlayhead) splitClip(clipAtPlayhead.id, playhead)
+      }
       if (e.key === ' ') { e.preventDefault(); setPlaying(!playing) }
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') { e.preventDefault(); undo() }
       if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) { e.preventDefault(); redo() }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selected, playing, undo, redo, removeClip, removeText, removeAudio, removeMulti, setPlaying])
+  }, [selected, playing, clips, playhead, undo, redo, removeClip, removeText, removeAudio, removeMulti, setPlaying, splitClip])
 
   const handleAddText = () => {
     addText({

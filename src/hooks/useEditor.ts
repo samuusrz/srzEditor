@@ -93,7 +93,7 @@ function editorReducer(state: EditorState, action: Action): EditorState {
       const c2: Clip = { ...clip, id: crypto.randomUUID(), startAt: action.at, trimStart: clip.trimStart + offset, duration: clip.duration - offset }
       const clips: Clip[] = []
       for (const c of state.clips) { clips.push(c.id === action.clipId ? c1 : c); if (c.id === action.clipId) clips.push(c2) }
-      return { ...state, clips }
+      return { ...state, clips, selected: { type: 'clip', id: c2.id } }
     }
     case 'SET_CLIP_VOLUME':
       return { ...state, clips: state.clips.map(c => c.id === action.id ? { ...c, volume: action.volume } : c) }
@@ -132,8 +132,13 @@ function editorReducer(state: EditorState, action: Action): EditorState {
       return { ...state, audio: action.audio }
     case 'UPDATE_AUDIO':
       return { ...state, audio: state.audio ? { ...state.audio, ...action.patch } : null }
-    case 'DRAG_AUDIO_POS':
-      return { ...state, audio: state.audio ? { ...state.audio, startAt: Math.max(0, action.startAt) } : null }
+    case 'DRAG_AUDIO_POS': {
+      if (!state.audio) return state
+      const newStart = Math.max(0, action.startAt)
+      const delta = newStart - state.audio.startAt
+      const keyframes = state.audio.keyframes.map(kf => ({ ...kf, time: kf.time + delta }))
+      return { ...state, audio: { ...state.audio, startAt: newStart, keyframes } }
+    }
     case 'DRAG_AUDIO_KF':
       return { ...state, audio: state.audio ? { ...state.audio, keyframes: action.keyframes } : null }
     case 'REMOVE_AUDIO':
