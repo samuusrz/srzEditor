@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { ArrowLeft, Download, Undo2, Redo2, Check } from 'lucide-react'
 import { useEditor } from '../hooks/useEditor'
 import { saveProject, editorStateToProject } from '../lib/projectStorage'
-import type { Clip, EditorState } from '../types/editor'
+import type { Clip, TextOverlay, EditorState } from '../types/editor'
 import { MediaPanel }      from '../components/editor/MediaPanel'
 import { PreviewPanel }    from '../components/editor/PreviewPanel'
 import { PropertiesPanel } from '../components/editor/PropertiesPanel'
@@ -20,6 +20,13 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
   const [saved, setSaved] = useState(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // ── Clipboard ──────────────────────────────────────────────────────────
+  const [clipboard, setClipboard] = useState<{
+    clips: Clip[]
+    texts: TextOverlay[]
+    anchor: number
+  } | null>(null)
 
   const {
     state, totalDuration,
@@ -63,7 +70,59 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      const isInput = tag === 'INPUT' || tag === 'TEXTAREA'
+
+      // ── Copy ──────────────────────────────────────────────────────────
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'c') {
+        if (isInput) return // allow normal text copy in inputs
+        e.preventDefault()
+        if (selected?.type === 'clip') {
+          const c = clips.find(x => x.id === selected.id)
+          if (c) setClipboard({ clips: [c], texts: [], anchor: c.startAt })
+        } else if (selected?.type === 'text') {
+          const t = texts.find(x => x.id === selected.id)
+          if (t) setClipboard({ clips: [], texts: [t], anchor: t.startAt })
+        } else if (selected?.type === 'multi') {
+          const selClips = clips.filter(c => selected.clipIds.includes(c.id))
+          const selTexts = texts.filter(t => selected.textIds.includes(t.id))
+          const starts = [...selClips.map(c => c.startAt), ...selTexts.map(t => t.startAt)]
+          setClipboard({ clips: selClips, texts: selTexts, anchor: starts.length ? Math.min(...starts) : playhead })
+        }
+        return
+      }
+
+      // ── Cut ───────────────────────────────────────────────────────────
+      if ((e.ctrlKey || e.metaKey) && e.key === 'x') {
+        if (isInput) return
+        e.preventDefault()
+        if (selected?.type === 'clip') {
+          const c = clips.find(x => x.id === selected.id)
+          if (c) { setClipboard({ clips: [c], texts: [], anchor: c.startAt }); removeClip(c.id) }
+        } else if (selected?.type === 'text') {
+          const t = texts.find(x => x.id === selected.id)
+          if (t) { setClipboard({ clips: [], texts: [t], anchor: t.startAt }); removeText(t.id) }
+        } else if (selected?.type === 'multi') {
+          const selClips = clips.filter(c => selected.clipIds.includes(c.id))
+          const selTexts = texts.filter(t => selected.textIds.includes(t.id))
+          const starts = [...selClips.map(c => c.startAt), ...selTexts.map(t => t.startAt)]
+          setClipboard({ clips: selClips, texts: selTexts, anchor: starts.length ? Math.min(...starts) : playhead })
+          removeMulti(selected.clipIds, selected.textIds)
+        }
+        return
+      }
+
+      // ── Paste ─────────────────────────────────────────────────────────
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+        if (isInput) return
+        e.preventDefault()
+        if (!clipboard) return
+        const offset = playhead - clipboard.anchor
+        clipboard.clips.forEach(c => addClip({ ...c, id: crypto.randomUUID(), startAt: Math.max(0, c.startAt + offset) }))
+        clipboard.texts.forEach(t => addText({ ...t, id: crypto.randomUUID(), startAt: Math.max(0, t.startAt + offset) }))
+        return
+      }
+
+      if (isInput) return
 
       if (e.key === 'Backspace' || e.key === 'Delete') {
         if (selected?.type === 'clip')  removeClip(selected.id)
@@ -73,13 +132,11 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
       }
       if (e.key === 'c' || e.key === 'C') {
         if (selected?.type === 'text') {
-          // Cut the selected text at playhead
           const text = texts.find(t => t.id === selected.id)
           if (text && playhead > text.startAt && playhead < text.startAt + text.duration) {
             splitText(text.id, playhead)
           }
         } else {
-          // Cut the clip under the playhead (no selection required)
           const clipAtPlayhead = clips.find(c => c.startAt <= playhead && playhead < c.startAt + c.duration)
           if (clipAtPlayhead) splitClip(clipAtPlayhead.id, playhead)
         }
@@ -90,7 +147,7 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selected, playing, clips, texts, playhead, undo, redo, removeClip, removeText, splitText, removeAudio, removeMulti, setPlaying, splitClip])
+  }, [selected, playing, clips, texts, playhead, clipboard, undo, redo, addClip, addText, removeClip, removeText, splitText, removeAudio, removeMulti, setPlaying, splitClip])
 
   const handleAddText = () => {
     addText({
