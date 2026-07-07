@@ -127,6 +127,8 @@ async function execWithProgress(
     // When FFmpeg finishes encoding (p≈1), it enters a silent mux phase.
     // Start a slow animation so the bar doesn't appear frozen.
     if (p >= 0.98 && !animTimer) {
+      // Stop receiving progress events — further FFmpeg events at p=1.0 would reset the step
+      ffmpeg.off('progress', handler)
       animTimer = setInterval(() => {
         if (lastPct < 95) { lastPct++; onProgress({ step: 'Generando archivo…', pct: lastPct }) }
       }, 2500)

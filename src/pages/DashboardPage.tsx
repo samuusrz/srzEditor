@@ -122,14 +122,16 @@ export function DashboardPage({ onNavigate, onNewEditor, onOpenProject }: Dashbo
       {editorProjects.length > 0 && (
         <div className="mb-10">
           <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wide mb-3">Ediciones recientes</h2>
-          <div className="grid grid-cols-3 gap-3">
+          {/* Horizontal scroll row — each card is a fixed-width 9:16 portrait thumbnail */}
+          <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
             {editorProjects.map(p => (
               <button
                 key={p.id}
                 onClick={() => handleOpenEditorProject(p)}
-                className="group bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden text-left hover:border-violet-700 transition-all cursor-pointer"
+                className="group flex-none w-32 bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden text-left hover:border-violet-700 transition-all cursor-pointer"
               >
-                <div className="bg-zinc-800 relative overflow-hidden" style={{ aspectRatio: '9/16', maxHeight: 110 }}>
+                {/* 9:16 thumbnail — no maxHeight constraint */}
+                <div className="bg-zinc-800 relative overflow-hidden w-full" style={{ aspectRatio: '9/16' }}>
                   {p.thumbnail
                     ? <img src={p.thumbnail} className="w-full h-full object-cover" alt="" />
                     : <div className="absolute inset-0 flex items-center justify-center text-zinc-600"><Film size={22} /></div>
@@ -139,7 +141,7 @@ export function DashboardPage({ onNavigate, onNewEditor, onOpenProject }: Dashbo
                   <p className="text-xs font-medium text-zinc-200 truncate">{p.name}</p>
                   <p className="text-[10px] text-zinc-500 mt-0.5">
                     {new Date(p.updatedAt).toLocaleDateString('es-ES', {
-                      day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+                      day: 'numeric', month: 'short',
                     })}
                   </p>
                 </div>
