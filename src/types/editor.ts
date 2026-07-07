@@ -23,6 +23,7 @@ export interface TextOverlay {
   fontSize: number
   color: string
   bold: boolean
+  track: number   // text track index (0 = top)
 }
 
 export interface VolumeKeyframe {
@@ -37,6 +38,7 @@ export interface AudioTrack {
   name: string
   startAt: number
   duration: number
+  originalDuration: number    // full file duration (cap for right trim)
   volume: number
   fadeIn: number
   fadeOut: number

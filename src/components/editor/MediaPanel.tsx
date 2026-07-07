@@ -94,7 +94,7 @@ export function MediaPanel({
     onSetAudio({
       id: crypto.randomUUID(), file, localUrl,
       name: file.name.replace(/\.[^.]+$/, ''),
-      startAt: 0, duration, volume: 1, fadeIn: 0, fadeOut: 0, keyframes: [],
+      startAt: 0, duration, originalDuration: duration, volume: 1, fadeIn: 0, fadeOut: 0, keyframes: [],
     })
   }
 
@@ -102,7 +102,7 @@ export function MediaPanel({
     onAddText({
       id: crypto.randomUUID(), content: 'Texto',
       startAt: 0, duration: Math.max(3, totalDuration),
-      x: 50, y: 15, fontSize: 21, color: '#ffffff', bold: true,
+      x: 50, y: 15, fontSize: 21, color: '#ffffff', bold: true, track: 0,
     })
   }
 
@@ -240,7 +240,7 @@ function TextLibraryPane({ onAddText, totalDuration }: { onAddText: (t: TextOver
     onAddText({
       id: crypto.randomUUID(), content: item.content,
       startAt: 0, duration: Math.max(3, totalDuration),
-      x: 50, y: 15, fontSize: 21, color: '#ffffff', bold: true,
+      x: 50, y: 15, fontSize: 21, color: '#ffffff', bold: true, track: 0,
     })
   }
 
@@ -343,9 +343,10 @@ function AudioLibraryPane({ onSetAudio }: { onSetAudio: (a: AudioTrack) => void 
     const url = getPublicUrl(song.storage_path)
     try {
       const { file, duration, localUrl } = await fetchAudioFile(url, song.name)
+      const finalDuration = song.duration ?? duration
       onSetAudio({
         id: crypto.randomUUID(), file, localUrl, name: song.name,
-        startAt: 0, duration: song.duration ?? duration,
+        startAt: 0, duration: finalDuration, originalDuration: finalDuration,
         volume: 1, fadeIn: 0, fadeOut: 0, keyframes: [],
       })
     } catch (e) { console.error(e) }

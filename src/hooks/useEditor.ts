@@ -18,13 +18,16 @@ type Action =
   | { type: 'DRAG_TEXT_POS'; id: string; x: number; y: number }       // drag (not undoable)
   | { type: 'SPLIT_TEXT'; textId: string; at: number }
   | { type: 'REMOVE_TEXT'; id: string }
-  | { type: 'MOVE_TEXT'; id: string; startAt: number }          // drag (not undoable)
+  | { type: 'MOVE_TEXT'; id: string; startAt: number; track?: number }   // drag (not undoable)
+  | { type: 'TRIM_TEXT'; id: string; startAt: number; duration: number } // drag (not undoable)
+  | { type: 'RESOLVE_TEXT_CONFLICTS'; winnerId: string }                  // resolve text overlaps
   | { type: 'MOVE_MULTI'; clips: Array<{ id: string; startAt: number }>; texts: Array<{ id: string; startAt: number }> }  // multi drag (not undoable)
   | { type: 'REMOVE_MULTI'; clipIds: string[]; textIds: string[] }     // undoable
   | { type: 'SET_AUDIO'; audio: AudioTrack }
   | { type: 'UPDATE_AUDIO'; patch: Partial<AudioTrack> }        // undoable (property panel)
   | { type: 'DRAG_AUDIO_POS'; startAt: number }                 // drag (not undoable)
   | { type: 'DRAG_AUDIO_KF'; keyframes: VolumeKeyframe[] }      // drag (not undoable)
+  | { type: 'TRIM_AUDIO'; startAt: number; duration: number }   // drag (not undoable)
   | { type: 'REMOVE_AUDIO' }
   | { type: 'SET_PLAYHEAD'; time: number }
   | { type: 'SET_PLAYING'; playing: boolean }
@@ -106,6 +109,7 @@ function editorReducer(state: EditorState, action: Action): EditorState {
       const audio: AudioTrack = {
         id: crypto.randomUUID(), file: clip.file, localUrl: clip.localUrl,
         name: `Audio · ${clip.name}`, startAt: clip.startAt, duration: clip.originalDuration,
+        originalDuration: clip.originalDuration,
         volume: 1, fadeIn: 0, fadeOut: 0, keyframes: [],
       }
       return { ...state, audio, clips: state.clips.map(c => c.id === action.clipId ? { ...c, muted: true } : c) }
@@ -122,7 +126,7 @@ function editorReducer(state: EditorState, action: Action): EditorState {
       const offset = action.at - text.startAt
       if (offset <= 0.05 || offset >= text.duration - 0.05) return state
       const t1: TextOverlay = { ...text, duration: offset }
-      const t2: TextOverlay = { ...text, id: crypto.randomUUID(), startAt: action.at, duration: text.duration - offset }
+      const t2: TextOverlay = { ...text, id: crypto.randomUUID(), startAt: action.at, duration: text.duration - offset, track: text.track ?? 0 }
       const texts: TextOverlay[] = []
       for (const t of state.texts) { texts.push(t.id === action.textId ? t1 : t); if (t.id === action.textId) texts.push(t2) }
       return { ...state, texts, selected: { type: 'text', id: t2.id } }
@@ -130,7 +134,30 @@ function editorReducer(state: EditorState, action: Action): EditorState {
     case 'REMOVE_TEXT':
       return { ...state, texts: state.texts.filter(t => t.id !== action.id), selected: null }
     case 'MOVE_TEXT':
-      return { ...state, texts: state.texts.map(t => t.id === action.id ? { ...t, startAt: Math.max(0, action.startAt) } : t) }
+      return { ...state, texts: state.texts.map(t => t.id === action.id ? { ...t, startAt: Math.max(0, action.startAt), ...(action.track !== undefined && { track: action.track }) } : t) }
+    case 'TRIM_TEXT':
+      return { ...state, texts: state.texts.map(t => t.id === action.id ? { ...t, startAt: Math.max(0, action.startAt), duration: Math.max(0.1, action.duration) } : t) }
+    case 'RESOLVE_TEXT_CONFLICTS': {
+      const winner = state.texts.find(t => t.id === action.winnerId)
+      if (!winner) return state
+      let texts = state.texts
+      const wt = winner.track ?? 0
+      const conflicts = texts.filter(t =>
+        t.id !== winner.id && (t.track ?? 0) === wt &&
+        t.startAt < winner.startAt + winner.duration && t.startAt + t.duration > winner.startAt
+      )
+      for (const conflict of conflicts) {
+        let newTrack = wt + 1
+        while (true) {
+          const occupied = texts.filter(t => t.id !== conflict.id && (t.track ?? 0) === newTrack)
+          const hasOverlap = occupied.some(t => t.startAt < conflict.startAt + conflict.duration && t.startAt + t.duration > conflict.startAt)
+          if (!hasOverlap) break
+          newTrack++
+        }
+        texts = texts.map(t => t.id === conflict.id ? { ...t, track: newTrack } : t)
+      }
+      return { ...state, texts }
+    }
     case 'MOVE_MULTI': {
       let clips = state.clips
       let texts = state.texts
@@ -153,6 +180,8 @@ function editorReducer(state: EditorState, action: Action): EditorState {
     }
     case 'DRAG_AUDIO_KF':
       return { ...state, audio: state.audio ? { ...state.audio, keyframes: action.keyframes } : null }
+    case 'TRIM_AUDIO':
+      return { ...state, audio: state.audio ? { ...state.audio, startAt: Math.max(0, action.startAt), duration: Math.max(0.1, action.duration) } : null }
     case 'REMOVE_AUDIO':
       return { ...state, audio: null, selected: null }
     case 'SET_PLAYHEAD':
@@ -263,7 +292,10 @@ export function useEditor(initialState?: EditorState) {
     dragTextPos:    useCallback((id: string, x: number, y: number) => dispatch({ type: 'DRAG_TEXT_POS', id, x, y }), []),
     splitText:      useCallback((textId: string, at: number) => dispatch({ type: 'SPLIT_TEXT', textId, at }), []),
     removeText:     useCallback((id: string) => dispatch({ type: 'REMOVE_TEXT', id }), []),
-    moveText:       useCallback((id: string, startAt: number) => dispatch({ type: 'MOVE_TEXT', id, startAt }), []),
+    moveText:       useCallback((id: string, startAt: number, track?: number) => dispatch({ type: 'MOVE_TEXT', id, startAt, track }), []),
+    trimText:       useCallback((id: string, startAt: number, duration: number) => dispatch({ type: 'TRIM_TEXT', id, startAt, duration }), []),
+    resolveTextConflicts: useCallback((winnerId: string) => dispatch({ type: 'RESOLVE_TEXT_CONFLICTS', winnerId }), []),
+    trimAudio:      useCallback((startAt: number, duration: number) => dispatch({ type: 'TRIM_AUDIO', startAt, duration }), []),
     moveMulti:      useCallback((clips: Array<{id:string;startAt:number}>, texts: Array<{id:string;startAt:number}>) => dispatch({ type: 'MOVE_MULTI', clips, texts }), []),
     removeMulti:    useCallback((clipIds: string[], textIds: string[]) => dispatch({ type: 'REMOVE_MULTI', clipIds, textIds }), []),
     setAudio:       useCallback((audio: AudioTrack) => dispatch({ type: 'SET_AUDIO', audio }), []),

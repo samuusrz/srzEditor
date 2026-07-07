@@ -26,8 +26,8 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
     canUndo, canRedo, undo, redo, snapshot,
     addClip, removeClip, resolveClipConflicts, moveClip, trimClip, splitClip,
     setClipVolume, toggleClipMute, extractAudio,
-    addText, updateText, dragTextPos, removeText, splitText, moveText, moveMulti, removeMulti,
-    setAudio, updateAudio, dragAudioPos, dragAudioKf, removeAudio,
+    addText, updateText, dragTextPos, removeText, splitText, moveText, trimText, resolveTextConflicts, moveMulti, removeMulti,
+    setAudio, updateAudio, dragAudioPos, dragAudioKf, trimAudio, removeAudio,
     setPlayhead, setPlaying, setZoom, select,
   } = useEditor(initialEditorState)
 
@@ -98,7 +98,7 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
       content: 'Texto',
       startAt: Math.max(0, playhead),
       duration: Math.max(3, totalDuration > 0 ? totalDuration : 3),
-      x: 50, y: 15,
+      x: 50, y: 15, track: 0,
       fontSize: 21,
       color: '#ffffff',
       bold: true,
@@ -182,8 +182,9 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
         onMoveClip={moveClip} onTrimClip={trimClip} onSplitClip={splitClip}
         onResolveConflicts={resolveClipConflicts}
         onToggleMute={toggleClipMute} onExtractAudio={extractAudio}
-        onMoveText={moveText} onMoveAudio={updateAudio}
-        onDragAudioPos={dragAudioPos} onDragAudioKf={dragAudioKf}
+        onMoveText={moveText} onTrimText={trimText} onResolveTextConflicts={resolveTextConflicts}
+        onMoveAudio={updateAudio}
+        onDragAudioPos={dragAudioPos} onDragAudioKf={dragAudioKf} onTrimAudio={trimAudio}
         onMoveMulti={moveMulti}
         onSelect={select} onSetZoom={setZoom} onSnapshot={snapshot}
         onPreviewClip={handlePreviewClip}

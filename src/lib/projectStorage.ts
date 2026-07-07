@@ -85,9 +85,13 @@ export function editorStateToProject(state: EditorState, projectId: string): Edi
 
 export function hydrateEditorState(stored: StoredEditorState): EditorState {
   return {
-    clips:    stored.clips.map(c  => ({ ...c,  localUrl: URL.createObjectURL(c.file)  })),
-    texts:    stored.texts,
-    audio:    stored.audio ? { ...stored.audio, localUrl: URL.createObjectURL(stored.audio.file) } : null,
+    clips:    stored.clips.map(c  => ({ ...c, localUrl: URL.createObjectURL(c.file) })),
+    texts:    stored.texts.map(t  => ({ ...t, track: (t as any).track ?? 0 })),
+    audio:    stored.audio ? {
+      ...stored.audio,
+      localUrl: URL.createObjectURL(stored.audio.file),
+      originalDuration: (stored.audio as any).originalDuration ?? stored.audio.duration,
+    } : null,
     zoom:     stored.zoom,
     playhead: 0,
     playing:  false,
