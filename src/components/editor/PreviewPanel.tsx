@@ -11,12 +11,14 @@ interface Props {
   playing: boolean
   totalDuration: number
   selected: SelectedItem
+  previewUntil: number | null
   onSetPlayhead: (t: number) => void
   onSetPlaying: (p: boolean) => void
   onUpdateText: (id: string, patch: Partial<TextOverlay>) => void
   onDragTextPos: (id: string, x: number, y: number) => void
   onSelect: (item: SelectedItem) => void
   onSnapshot: () => void
+  onClearPreview: () => void
 }
 
 function fmt(t: number) {
@@ -35,21 +37,25 @@ function calcFadeVolume(t: number, duration: number, fadeIn: number, fadeOut: nu
 const SNAP = 2.5  // % threshold to trigger snap
 
 export function PreviewPanel({
-  clips, texts, audio, playhead, playing, totalDuration, selected,
-  onSetPlayhead, onSetPlaying, onUpdateText, onDragTextPos, onSelect, onSnapshot,
+  clips, texts, audio, playhead, playing, totalDuration, selected, previewUntil,
+  onSetPlayhead, onSetPlaying, onUpdateText, onDragTextPos, onSelect, onSnapshot, onClearPreview,
 }: Props) {
-  const videoRef      = useRef<HTMLVideoElement>(null)
-  const audioRef      = useRef<HTMLAudioElement>(null)
-  const previewRef    = useRef<HTMLDivElement>(null)
-  const playheadRef   = useRef(playhead)
-  const audioTrackRef = useRef(audio)
-  const rafRef        = useRef(0)
-  const lastTimeRef   = useRef(0)
-  const prevClipIdRef = useRef<string | null>(null)
-  const prevAudioUrl  = useRef<string | null>(null)
+  const videoRef        = useRef<HTMLVideoElement>(null)
+  const audioRef        = useRef<HTMLAudioElement>(null)
+  const previewRef      = useRef<HTMLDivElement>(null)
+  const playheadRef     = useRef(playhead)
+  const audioTrackRef   = useRef(audio)
+  const rafRef          = useRef(0)
+  const lastTimeRef     = useRef(0)
+  const prevClipIdRef   = useRef<string | null>(null)
+  const prevAudioUrl    = useRef<string | null>(null)
+  const previewUntilRef = useRef(previewUntil)
+  const onClearPreviewRef = useRef(onClearPreview)
 
-  playheadRef.current = playhead
-  audioTrackRef.current = audio
+  playheadRef.current     = playhead
+  audioTrackRef.current   = audio
+  previewUntilRef.current = previewUntil
+  onClearPreviewRef.current = onClearPreview
 
   const activeClip  = clips.find(c => c.startAt <= playhead && playhead < c.startAt + c.duration) ?? null
   const activeTexts = texts.filter(t => t.startAt <= playhead && playhead < t.startAt + t.duration)
@@ -138,6 +144,11 @@ export function PreviewPanel({
         }
       }
 
+      if (previewUntilRef.current !== null && next >= previewUntilRef.current) {
+        onSetPlaying(false)
+        onClearPreviewRef.current()
+        return
+      }
       if (next >= totalDuration) { onSetPlaying(false); onSetPlayhead(0); return }
       onSetPlayhead(next)
       rafRef.current = requestAnimationFrame(tick)

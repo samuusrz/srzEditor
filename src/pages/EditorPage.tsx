@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { ArrowLeft, Download, Undo2, Redo2, Check } from 'lucide-react'
 import { useEditor } from '../hooks/useEditor'
 import { saveProject, editorStateToProject } from '../lib/projectStorage'
-import type { EditorState } from '../types/editor'
+import type { Clip, EditorState } from '../types/editor'
 import { MediaPanel }      from '../components/editor/MediaPanel'
 import { PreviewPanel }    from '../components/editor/PreviewPanel'
 import { PropertiesPanel } from '../components/editor/PropertiesPanel'
@@ -26,10 +26,20 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
     canUndo, canRedo, undo, redo, snapshot,
     addClip, removeClip, resolveClipConflicts, moveClip, trimClip, splitClip,
     setClipVolume, toggleClipMute, extractAudio,
-    addText, updateText, dragTextPos, removeText, moveText,
+    addText, updateText, dragTextPos, removeText, moveText, moveMulti, removeMulti,
     setAudio, updateAudio, dragAudioPos, dragAudioKf, removeAudio,
     setPlayhead, setPlaying, setZoom, select,
   } = useEditor(initialEditorState)
+
+  const [previewUntil, setPreviewUntil] = useState<number | null>(null)
+
+  const handlePreviewClip = useCallback((clip: Clip) => {
+    setPlayhead(clip.startAt)
+    setPlaying(true)
+    setPreviewUntil(clip.startAt + clip.duration)
+  }, [setPlayhead, setPlaying])
+
+  const handleClearPreview = useCallback(() => setPreviewUntil(null), [])
 
   const { clips, texts, audio, playhead, playing, zoom, selected } = state
 
@@ -59,6 +69,7 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
         if (selected?.type === 'clip')  removeClip(selected.id)
         if (selected?.type === 'text')  removeText(selected.id)
         if (selected?.type === 'audio') removeAudio()
+        if (selected?.type === 'multi') removeMulti(selected.clipIds, selected.textIds)
       }
       if (e.key === ' ') { e.preventDefault(); setPlaying(!playing) }
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') { e.preventDefault(); undo() }
@@ -66,7 +77,7 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selected, playing, undo, redo, removeClip, removeText, removeAudio, setPlaying])
+  }, [selected, playing, undo, redo, removeClip, removeText, removeAudio, removeMulti, setPlaying])
 
   const handleAddText = () => {
     addText({
@@ -137,10 +148,10 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
         <PreviewPanel
           clips={clips} texts={texts} audio={audio}
           playhead={playhead} playing={playing} totalDuration={totalDuration}
-          selected={selected}
+          selected={selected} previewUntil={previewUntil}
           onSetPlayhead={setPlayhead} onSetPlaying={setPlaying}
           onUpdateText={updateText} onDragTextPos={dragTextPos}
-          onSelect={select} onSnapshot={snapshot}
+          onSelect={select} onSnapshot={snapshot} onClearPreview={handleClearPreview}
         />
         <PropertiesPanel
           selected={selected} clips={clips} texts={texts} audio={audio} totalDuration={totalDuration}
@@ -160,7 +171,9 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
         onToggleMute={toggleClipMute} onExtractAudio={extractAudio}
         onMoveText={moveText} onMoveAudio={updateAudio}
         onDragAudioPos={dragAudioPos} onDragAudioKf={dragAudioKf}
+        onMoveMulti={moveMulti}
         onSelect={select} onSetZoom={setZoom} onSnapshot={snapshot}
+        onPreviewClip={handlePreviewClip}
       />
 
       {showExport && (

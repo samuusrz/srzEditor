@@ -141,22 +141,24 @@ export function MediaPanel({
             <Upload size={20} className="text-zinc-500" />
             <p className="text-xs text-zinc-500 text-center">Arrastra vídeos o haz clic</p>
           </div>
-          {clips.map(clip => (
-            <div key={clip.id} className="group relative rounded-lg overflow-hidden bg-zinc-900 border border-zinc-800">
-              {clip.thumbnail
-                ? <img src={clip.thumbnail} className="w-full aspect-video object-cover" alt="" />
-                : <div className="w-full aspect-video bg-zinc-800 flex items-center justify-center"><Film size={20} className="text-zinc-600" /></div>
-              }
-              <div className="px-2 py-1.5 flex items-center justify-between">
-                <p className="text-xs text-zinc-300 truncate flex-1">{clip.name}</p>
-                <span className="text-[10px] text-zinc-500 ml-1">{clip.duration.toFixed(1)}s</span>
+          <div className="grid grid-cols-2 gap-2">
+            {clips.map(clip => (
+              <div key={clip.id} className="group relative rounded-lg overflow-hidden bg-zinc-900 border border-zinc-800">
+                {clip.thumbnail
+                  ? <img src={clip.thumbnail} className="w-full aspect-[9/16] object-cover" alt="" />
+                  : <div className="w-full aspect-[9/16] bg-zinc-800 flex items-center justify-center"><Film size={16} className="text-zinc-600" /></div>
+                }
+                <div className="px-1.5 py-1 flex flex-col">
+                  <p className="text-[10px] text-zinc-300 truncate">{clip.name}</p>
+                  <span className="text-[9px] text-zinc-500">{clip.duration.toFixed(1)}s</span>
+                </div>
+                <button onClick={() => onRemoveClip(clip.id)}
+                  className="absolute top-1 right-1 p-0.5 bg-black/60 rounded opacity-0 group-hover:opacity-100 transition-opacity text-zinc-400 hover:text-red-400 cursor-pointer">
+                  <Trash2 size={10} />
+                </button>
               </div>
-              <button onClick={() => onRemoveClip(clip.id)}
-                className="absolute top-1 right-1 p-1 bg-black/60 rounded opacity-0 group-hover:opacity-100 transition-opacity text-zinc-400 hover:text-red-400 cursor-pointer">
-                <Trash2 size={12} />
-              </button>
-            </div>
-          ))}
+            ))}
+          </div>
           {clips.length === 0 && <p className="text-xs text-zinc-600 text-center mt-2">Sin clips importados</p>}
         </div>
       )}

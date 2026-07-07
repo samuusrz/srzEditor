@@ -47,6 +47,7 @@ export type SelectedItem =
   | { type: 'clip'; id: string }
   | { type: 'text'; id: string }
   | { type: 'audio' }
+  | { type: 'multi'; clipIds: string[]; textIds: string[] }
   | null
 
 export interface EditorState {

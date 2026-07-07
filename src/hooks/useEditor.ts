@@ -18,6 +18,8 @@ type Action =
   | { type: 'DRAG_TEXT_POS'; id: string; x: number; y: number }       // drag (not undoable)
   | { type: 'REMOVE_TEXT'; id: string }
   | { type: 'MOVE_TEXT'; id: string; startAt: number }          // drag (not undoable)
+  | { type: 'MOVE_MULTI'; clips: Array<{ id: string; startAt: number }>; texts: Array<{ id: string; startAt: number }> }  // multi drag (not undoable)
+  | { type: 'REMOVE_MULTI'; clipIds: string[]; textIds: string[] }     // undoable
   | { type: 'SET_AUDIO'; audio: AudioTrack }
   | { type: 'UPDATE_AUDIO'; patch: Partial<AudioTrack> }        // undoable (property panel)
   | { type: 'DRAG_AUDIO_POS'; startAt: number }                 // drag (not undoable)
@@ -32,7 +34,7 @@ type Action =
 const UNDOABLE = new Set([
   'ADD_CLIP', 'REMOVE_CLIP', 'SPLIT_CLIP', 'RESOLVE_CONFLICTS',
   'SET_CLIP_VOLUME', 'TOGGLE_CLIP_MUTE', 'EXTRACT_AUDIO',
-  'ADD_TEXT', 'UPDATE_TEXT', 'REMOVE_TEXT',
+  'ADD_TEXT', 'UPDATE_TEXT', 'REMOVE_TEXT', 'REMOVE_MULTI',
   'SET_AUDIO', 'UPDATE_AUDIO', 'REMOVE_AUDIO',
 ])
 
@@ -54,10 +56,10 @@ function editorReducer(state: EditorState, action: Action): EditorState {
       const winner = state.clips.find(c => c.id === action.winnerId)
       if (!winner) return state
       let clips = state.clips
-      const wt = winner.track
+      const wt = winner.track ?? 0
       const conflicts = clips.filter(c =>
         c.id !== winner.id &&
-        c.track === wt &&
+        (c.track ?? 0) === wt &&
         c.startAt < winner.startAt + winner.duration &&
         c.startAt + c.duration > winner.startAt
       )
@@ -117,6 +119,15 @@ function editorReducer(state: EditorState, action: Action): EditorState {
       return { ...state, texts: state.texts.filter(t => t.id !== action.id), selected: null }
     case 'MOVE_TEXT':
       return { ...state, texts: state.texts.map(t => t.id === action.id ? { ...t, startAt: Math.max(0, action.startAt) } : t) }
+    case 'MOVE_MULTI': {
+      let clips = state.clips
+      let texts = state.texts
+      for (const m of action.clips) clips = clips.map(c => c.id === m.id ? { ...c, startAt: Math.max(0, m.startAt) } : c)
+      for (const m of action.texts) texts = texts.map(t => t.id === m.id ? { ...t, startAt: Math.max(0, m.startAt) } : t)
+      return { ...state, clips, texts }
+    }
+    case 'REMOVE_MULTI':
+      return { ...state, clips: state.clips.filter(c => !action.clipIds.includes(c.id)), texts: state.texts.filter(t => !action.textIds.includes(t.id)), selected: null }
     case 'SET_AUDIO':
       return { ...state, audio: action.audio }
     case 'UPDATE_AUDIO':
@@ -235,6 +246,8 @@ export function useEditor(initialState?: EditorState) {
     dragTextPos:    useCallback((id: string, x: number, y: number) => dispatch({ type: 'DRAG_TEXT_POS', id, x, y }), []),
     removeText:     useCallback((id: string) => dispatch({ type: 'REMOVE_TEXT', id }), []),
     moveText:       useCallback((id: string, startAt: number) => dispatch({ type: 'MOVE_TEXT', id, startAt }), []),
+    moveMulti:      useCallback((clips: Array<{id:string;startAt:number}>, texts: Array<{id:string;startAt:number}>) => dispatch({ type: 'MOVE_MULTI', clips, texts }), []),
+    removeMulti:    useCallback((clipIds: string[], textIds: string[]) => dispatch({ type: 'REMOVE_MULTI', clipIds, textIds }), []),
     setAudio:       useCallback((audio: AudioTrack) => dispatch({ type: 'SET_AUDIO', audio }), []),
     updateAudio:    useCallback((patch: Partial<AudioTrack>) => dispatch({ type: 'UPDATE_AUDIO', patch }), []),
     dragAudioPos:   useCallback((startAt: number) => dispatch({ type: 'DRAG_AUDIO_POS', startAt }), []),

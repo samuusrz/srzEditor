@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useState, useRef, useEffect } from 'react'
 import { ZoomIn, ZoomOut, Scissors, Volume2, VolumeX, Layers, Diamond, Trash2 } from 'lucide-react'
 import type { Clip, TextOverlay, AudioTrack, SelectedItem, VolumeKeyframe } from '../../types/editor'
 
@@ -50,17 +50,25 @@ interface Props {
   onMoveAudio: (patch: Partial<AudioTrack>) => void
   onDragAudioPos: (startAt: number) => void
   onDragAudioKf: (keyframes: VolumeKeyframe[]) => void
+  onMoveMulti: (clipMoves: Array<{ id: string; startAt: number }>, textMoves: Array<{ id: string; startAt: number }>) => void
   onSelect: (item: SelectedItem) => void
   onSetZoom: (z: number) => void
   onSnapshot: () => void
+  onPreviewClip: (clip: Clip) => void
 }
 
 export function Timeline({
   clips, texts, audio, playhead, totalDuration, zoom, selected,
   onSetPlayhead, onMoveClip, onTrimClip, onSplitClip, onResolveConflicts, onToggleMute,
-  onExtractAudio, onMoveText, onMoveAudio, onDragAudioPos, onDragAudioKf, onSelect, onSetZoom, onSnapshot,
+  onExtractAudio, onMoveText, onMoveAudio, onDragAudioPos, onDragAudioKf, onMoveMulti,
+  onSelect, onSetZoom, onSnapshot, onPreviewClip,
 }: Props) {
   const [snapLine, setSnapLine] = useState<number | null>(null)
+  // Rubber band: stored in content coordinates
+  const [band, setBand] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+
+  const containerRef = useRef<HTMLDivElement>(null)
+  const scrollRef    = useRef<HTMLDivElement>(null)
 
   const visibleSecs  = Math.max(totalDuration + 5, 15)
   const totalWidth   = visibleSecs * zoom
@@ -71,16 +79,35 @@ export function Timeline({
   const ticks: number[] = []
   for (let t = 0; t <= visibleSecs; t += tickStep) ticks.push(t)
 
-  const selClipId = selected?.type === 'clip' ? selected.id : null
+  const selClipId  = selected?.type === 'clip' ? selected.id : null
   const isAudioSel = selected?.type === 'audio'
 
-  // ── Ctrl+scroll zoom ────────────────────────────────────────────────────
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault()
-      onSetZoom(Math.max(40, Math.min(400, zoom + (e.deltaY > 0 ? -15 : 15))))
+  const isClipSelected = (id: string) =>
+    (selected?.type === 'clip' && selected.id === id) ||
+    (selected?.type === 'multi' && selected.clipIds.includes(id))
+  const isTextSelected = (id: string) =>
+    (selected?.type === 'text' && selected.id === id) ||
+    (selected?.type === 'multi' && selected.textIds.includes(id))
+
+  // ── Ctrl+scroll zoom (non-passive) ──────────────────────────────────────
+  const zoomRef = useRef(zoom)
+  zoomRef.current = zoom
+  const onSetZoomRef = useRef(onSetZoom)
+  onSetZoomRef.current = onSetZoom
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const handler = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault()
+        e.stopPropagation()
+        onSetZoomRef.current(Math.max(40, Math.min(400, zoomRef.current + (e.deltaY > 0 ? -15 : 15))))
+      }
     }
-  }, [zoom, onSetZoom])
+    el.addEventListener('wheel', handler, { passive: false })
+    return () => el.removeEventListener('wheel', handler)
+  }, [])
 
   // ── Ruler seek ──────────────────────────────────────────────────────────
   const handleRulerClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -113,36 +140,98 @@ export function Timeline({
     }
   }
 
-  // ── Clip body drag with snapping + multi-track conflict resolve ──────────
+  // ── Clip body drag with snapping + preview + Ctrl+click + multi-drag ────
   const startClipDrag = (e: React.MouseEvent, clip: Clip) => {
-    onSelect({ type: 'clip', id: clip.id })
-    const startX = e.clientX; const orig = clip.startAt
-    makeDrag(ev => {
-      const raw    = Math.max(0, orig + (ev.clientX - startX) / zoom)
-      const thresh = 8 / zoom  // 8px snap radius
+    e.stopPropagation()
+    const ctrlKey = e.ctrlKey || e.metaKey
 
-      // Snap to edges of same-track clips and t=0
-      const sameTracks = clips.filter(c => c.id !== clip.id && (c.track ?? 0) === (clip.track ?? 0))
-      const snapPts = [0, ...sameTracks.flatMap(c => [c.startAt, c.startAt + c.duration])]
-
-      let snapped    = raw
-      let snapTarget: number | null = null
-      for (const sp of snapPts) {
-        if (Math.abs(raw - sp) < thresh) {
-          snapped = sp; snapTarget = sp; break
-        }
-        if (Math.abs(raw + clip.duration - sp) < thresh) {
-          snapped = sp - clip.duration; snapTarget = sp; break
-        }
+    // Ctrl+click: toggle in multi-selection
+    if (ctrlKey) {
+      if (selected?.type === 'multi') {
+        const clipIds = selected.clipIds.includes(clip.id)
+          ? selected.clipIds.filter(id => id !== clip.id)
+          : [...selected.clipIds, clip.id]
+        const textIds = selected.textIds
+        if (clipIds.length + textIds.length === 0) onSelect(null)
+        else if (clipIds.length === 1 && textIds.length === 0) onSelect({ type: 'clip', id: clipIds[0] })
+        else onSelect({ type: 'multi', clipIds, textIds })
+      } else if (selected?.type === 'clip') {
+        if (selected.id === clip.id) onSelect(null)
+        else onSelect({ type: 'multi', clipIds: [selected.id, clip.id], textIds: [] })
+      } else if (selected?.type === 'text') {
+        onSelect({ type: 'multi', clipIds: [clip.id], textIds: [selected.id] })
+      } else {
+        onSelect({ type: 'clip', id: clip.id })
       }
+      return
+    }
 
-      setSnapLine(snapTarget)
-      onMoveClip(clip.id, Math.max(0, snapped))
-    }, () => {
+    // Determine if this is a multi-drag
+    const isMultiDrag = selected?.type === 'multi' && selected.clipIds.includes(clip.id)
+
+    if (!isMultiDrag) onSelect({ type: 'clip', id: clip.id })
+
+    // Capture original positions
+    const origClipPositions: Record<string, number> = {}
+    const origTextPositions: Record<string, number> = {}
+    if (isMultiDrag && selected?.type === 'multi') {
+      for (const id of selected.clipIds) {
+        const c = clips.find(c => c.id === id)
+        if (c) origClipPositions[id] = c.startAt
+      }
+      for (const id of selected.textIds) {
+        const t = texts.find(t => t.id === id)
+        if (t) origTextPositions[id] = t.startAt
+      }
+    }
+
+    const startX = e.clientX
+    const orig   = clip.startAt
+    let hasDragged = false
+
+    const onMove = (ev: MouseEvent) => {
+      if (!hasDragged && Math.abs(ev.clientX - startX) > 3) hasDragged = true
+      const delta = (ev.clientX - startX) / zoom
+
+      if (isMultiDrag && selected?.type === 'multi') {
+        const clipMoves = selected.clipIds.map(id => ({
+          id, startAt: Math.max(0, (origClipPositions[id] ?? 0) + delta),
+        }))
+        const textMoves = selected.textIds.map(id => ({
+          id, startAt: Math.max(0, (origTextPositions[id] ?? 0) + delta),
+        }))
+        onMoveMulti(clipMoves, textMoves)
+      } else {
+        const raw    = Math.max(0, orig + delta)
+        const thresh = 8 / zoom
+        const sameTracks = clips.filter(c => c.id !== clip.id && (c.track ?? 0) === (clip.track ?? 0))
+        const snapPts = [0, ...sameTracks.flatMap(c => [c.startAt, c.startAt + c.duration])]
+        let snapped    = raw
+        let snapTarget: number | null = null
+        for (const sp of snapPts) {
+          if (Math.abs(raw - sp) < thresh) { snapped = sp; snapTarget = sp; break }
+          if (Math.abs(raw + clip.duration - sp) < thresh) { snapped = sp - clip.duration; snapTarget = sp; break }
+        }
+        setSnapLine(snapTarget)
+        onMoveClip(clip.id, Math.max(0, snapped))
+      }
+    }
+
+    const onUp = () => {
       setSnapLine(null)
-      onResolveConflicts(clip.id)  // move overlapping same-track clips to next track
-      onSnapshot()
-    })(e)
+      if (hasDragged) {
+        if (!isMultiDrag) onResolveConflicts(clip.id)
+        onSnapshot()
+      } else {
+        // Pure click — preview clip
+        onPreviewClip(clip)
+      }
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
   }
 
   // ── Clip trim ────────────────────────────────────────────────────────────
@@ -161,14 +250,67 @@ export function Timeline({
     }, () => onSnapshot())(e)
   }
 
-  // ── Text drag ────────────────────────────────────────────────────────────
+  // ── Text drag with Ctrl+click ────────────────────────────────────────────
   const startTextDrag = (e: React.MouseEvent, text: TextOverlay) => {
-    onSelect({ type: 'text', id: text.id })
-    const startX = e.clientX; const orig = text.startAt
-    makeDrag(
-      ev => onMoveText(text.id, Math.max(0, orig + (ev.clientX - startX) / zoom)),
-      () => onSnapshot(),
-    )(e)
+    e.stopPropagation()
+    const ctrlKey = e.ctrlKey || e.metaKey
+
+    if (ctrlKey) {
+      if (selected?.type === 'multi') {
+        const textIds = selected.textIds.includes(text.id)
+          ? selected.textIds.filter(id => id !== text.id)
+          : [...selected.textIds, text.id]
+        const clipIds = selected.clipIds
+        if (clipIds.length + textIds.length === 0) onSelect(null)
+        else if (textIds.length === 1 && clipIds.length === 0) onSelect({ type: 'text', id: textIds[0] })
+        else onSelect({ type: 'multi', clipIds, textIds })
+      } else if (selected?.type === 'text') {
+        if (selected.id === text.id) onSelect(null)
+        else onSelect({ type: 'multi', clipIds: [], textIds: [selected.id, text.id] })
+      } else if (selected?.type === 'clip') {
+        onSelect({ type: 'multi', clipIds: [selected.id], textIds: [text.id] })
+      } else {
+        onSelect({ type: 'text', id: text.id })
+      }
+      return
+    }
+
+    const isMultiDrag = selected?.type === 'multi' && selected.textIds.includes(text.id)
+    if (!isMultiDrag) onSelect({ type: 'text', id: text.id })
+
+    const origClipPositions: Record<string, number> = {}
+    const origTextPositions: Record<string, number> = {}
+    if (isMultiDrag && selected?.type === 'multi') {
+      for (const id of selected.clipIds) {
+        const c = clips.find(c => c.id === id)
+        if (c) origClipPositions[id] = c.startAt
+      }
+      for (const id of selected.textIds) {
+        const t = texts.find(t => t.id === id)
+        if (t) origTextPositions[id] = t.startAt
+      }
+    }
+
+    const startX = e.clientX
+    const orig = text.startAt
+
+    const onMove = (ev: MouseEvent) => {
+      const delta = (ev.clientX - startX) / zoom
+      if (isMultiDrag && selected?.type === 'multi') {
+        const clipMoves = selected.clipIds.map(id => ({
+          id, startAt: Math.max(0, (origClipPositions[id] ?? 0) + delta),
+        }))
+        const textMoves = selected.textIds.map(id => ({
+          id, startAt: Math.max(0, (origTextPositions[id] ?? 0) + delta),
+        }))
+        onMoveMulti(clipMoves, textMoves)
+      } else {
+        onMoveText(text.id, Math.max(0, orig + delta))
+      }
+    }
+    const onUp = () => { onSnapshot(); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
   }
 
   // ── Audio drag ───────────────────────────────────────────────────────────
@@ -231,10 +373,61 @@ export function Timeline({
     return pts
   }
 
-  const trackAreaHeight = RULER_H + videoTracks.length * TRACK_H + TRACK_H + TRACK_H  // ruler + videos + text + audio
+  // ── Rubber band selection ────────────────────────────────────────────────
+  const startBand = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Only on left button, and only if not on a clip/text/audio element
+    if (e.button !== 0) return
+    const target = e.target as HTMLElement
+    if (target.closest('[data-item]')) return
+
+    const scrollEl = scrollRef.current
+    if (!scrollEl) return
+    const rect = scrollEl.getBoundingClientRect()
+    const scrollLeft = scrollEl.scrollLeft
+
+    const x0 = e.clientX - rect.left + scrollLeft
+    const y0 = e.clientY - rect.top
+
+    setBand({ x0, y0, x1: x0, y1: y0 })
+
+    const onMove = (ev: MouseEvent) => {
+      const x1 = ev.clientX - rect.left + (scrollRef.current?.scrollLeft ?? 0)
+      const y1 = ev.clientY - rect.top
+      setBand({ x0, y0, x1, y1 })
+    }
+    const onUp = (ev: MouseEvent) => {
+      const x1 = ev.clientX - rect.left + (scrollRef.current?.scrollLeft ?? 0)
+      const bx0 = Math.min(x0, x1)
+      const bx1 = Math.max(x0, x1)
+
+      // Only select if band has meaningful width
+      if (bx1 - bx0 > 5) {
+        const t0 = bx0 / zoom
+        const t1 = bx1 / zoom
+        const clipIds = clips.filter(c => c.startAt < t1 && c.startAt + c.duration > t0).map(c => c.id)
+        const textIds = texts.filter(t => t.startAt < t1 && t.startAt + t.duration > t0).map(t => t.id)
+        if (clipIds.length + textIds.length > 1) {
+          onSelect({ type: 'multi', clipIds, textIds })
+        } else if (clipIds.length === 1 && textIds.length === 0) {
+          onSelect({ type: 'clip', id: clipIds[0] })
+        } else if (textIds.length === 1 && clipIds.length === 0) {
+          onSelect({ type: 'text', id: textIds[0] })
+        }
+      }
+
+      setBand(null)
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+
+  const trackAreaHeight = RULER_H + videoTracks.length * TRACK_H + TRACK_H + TRACK_H
 
   return (
-    <div className="flex-none bg-zinc-900 border-t border-zinc-800 flex flex-col select-none" style={{ height: Math.min(320, 48 + trackAreaHeight) }} onWheel={handleWheel}>
+    <div ref={containerRef} className="flex-none bg-zinc-900 border-t border-zinc-800 flex flex-col select-none" style={{ height: Math.min(320, 48 + trackAreaHeight) }}>
       {/* Controls */}
       <div className="h-9 flex items-center gap-1 px-3 border-b border-zinc-800 flex-none overflow-x-auto">
         <button onClick={() => onSetZoom(zoom - 20)} className="text-zinc-500 hover:text-zinc-200 cursor-pointer p-1"><ZoomOut size={13} /></button>
@@ -279,7 +472,7 @@ export function Timeline({
         </div>
 
         {/* Scrollable */}
-        <div className="flex-1 overflow-x-auto overflow-y-hidden relative">
+        <div ref={scrollRef} className="flex-1 overflow-x-auto overflow-y-hidden relative" onMouseDown={startBand}>
           <div style={{ width: totalWidth, minWidth: '100%', position: 'relative' }}>
 
             {/* Ruler */}
@@ -306,21 +499,39 @@ export function Timeline({
               <div className="absolute top-0 bottom-0 z-30 pointer-events-none" style={{ left: snapLine * zoom, width: 1, background: 'rgba(250,204,21,0.9)' }} />
             )}
 
+            {/* Rubber band */}
+            {band && (() => {
+              const bx = Math.min(band.x0, band.x1)
+              const by = Math.min(band.y0, band.y1)
+              const bw = Math.abs(band.x1 - band.x0)
+              const bh = Math.abs(band.y1 - band.y0)
+              return (
+                <div
+                  className="absolute z-40 pointer-events-none border border-blue-400 bg-blue-500/10 rounded-sm"
+                  style={{ left: bx, top: by, width: bw, height: bh }}
+                />
+              )
+            })()}
+
             {/* ── Video tracks (one row per track) ── */}
             {videoTracks.map(trackIdx => (
               <div key={trackIdx} className="relative" style={{ height: TRACK_H }}>
                 {clips.filter(c => (c.track ?? 0) === trackIdx).map(clip => {
                   const colorIdx = clips.indexOf(clip)
                   const w = Math.max(4, clip.duration * zoom)
+                  const isSel = isClipSelected(clip.id)
                   return (
                     <div
                       key={clip.id}
-                      className={`absolute top-1 bottom-1 rounded-md overflow-hidden border-2 transition-[border-color] ${CLIP_COLORS[colorIdx % CLIP_COLORS.length]} ${clip.id === selClipId ? 'border-white' : 'border-transparent'}`}
+                      data-item="clip"
+                      className={`absolute top-1 bottom-1 rounded-md overflow-hidden border-2 transition-[border-color] ${CLIP_COLORS[colorIdx % CLIP_COLORS.length]} ${isSel ? (selected?.type === 'multi' ? 'border-blue-300' : 'border-white') : 'border-transparent'}`}
                       style={{ left: clip.startAt * zoom, width: w }}
-                      onClick={() => onSelect({ type: 'clip', id: clip.id })}
                     >
                       {clip.thumbnail && <img src={clip.thumbnail} className="absolute inset-0 w-full h-full object-cover opacity-25" alt="" />}
-                      <div className="absolute inset-x-3 inset-y-0 cursor-grab active:cursor-grabbing flex items-center gap-1" onMouseDown={e => startClipDrag(e, clip)}>
+                      <div
+                        className="absolute inset-x-3 inset-y-0 cursor-grab active:cursor-grabbing flex items-center gap-1"
+                        onMouseDown={e => startClipDrag(e, clip)}
+                      >
                         {clip.muted && <VolumeX size={9} className="text-white/60 flex-none" />}
                         <span className="text-[10px] text-white font-medium truncate flex-1">{clip.name}</span>
                         <span className="text-[10px] text-white/50 flex-none">{clip.duration.toFixed(1)}s</span>
@@ -335,20 +546,23 @@ export function Timeline({
 
             {/* ── Text track ── */}
             <div className="relative" style={{ height: TRACK_H }}>
-              {texts.map(t => (
-                <div
-                  key={t.id}
-                  className={`absolute top-1 bottom-1 rounded-md overflow-hidden border-2 bg-amber-500/30 cursor-grab active:cursor-grabbing ${selected?.type === 'text' && selected.id === t.id ? 'border-amber-400' : 'border-amber-600/50'}`}
-                  style={{ left: t.startAt * zoom, width: Math.max(4, t.duration * zoom) }}
-                  onMouseDown={e => startTextDrag(e, t)}
-                  onClick={() => onSelect({ type: 'text', id: t.id })}
-                >
-                  <div className="absolute inset-x-1.5 inset-y-0 flex items-center gap-1">
-                    <span className="text-[10px] text-amber-200 truncate flex-1">{t.content || 'Texto'}</span>
-                    <span className="text-[10px] text-amber-200/50">{t.duration.toFixed(1)}s</span>
+              {texts.map(t => {
+                const isSel = isTextSelected(t.id)
+                return (
+                  <div
+                    key={t.id}
+                    data-item="text"
+                    className={`absolute top-1 bottom-1 rounded-md overflow-hidden border-2 bg-amber-500/30 cursor-grab active:cursor-grabbing ${isSel ? (selected?.type === 'multi' ? 'border-blue-300' : 'border-amber-400') : 'border-amber-600/50'}`}
+                    style={{ left: t.startAt * zoom, width: Math.max(4, t.duration * zoom) }}
+                    onMouseDown={e => startTextDrag(e, t)}
+                  >
+                    <div className="absolute inset-x-1.5 inset-y-0 flex items-center gap-1">
+                      <span className="text-[10px] text-amber-200 truncate flex-1">{t.content || 'Texto'}</span>
+                      <span className="text-[10px] text-amber-200/50">{t.duration.toFixed(1)}s</span>
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
 
             {/* ── Audio track ── */}
@@ -361,6 +575,7 @@ export function Timeline({
 
                 return (
                   <div
+                    data-item="audio"
                     className={`absolute top-1 bottom-1 rounded-md overflow-hidden border-2 bg-emerald-600/30 cursor-grab active:cursor-grabbing ${isAudioSel ? 'border-emerald-400' : 'border-emerald-700/60'}`}
                     style={{ left: audio.startAt * zoom, width: w }}
                     onMouseDown={startAudioDrag}
