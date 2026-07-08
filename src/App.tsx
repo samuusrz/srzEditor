@@ -6,9 +6,10 @@ import { EditorPage } from './pages/EditorPage'
 import { TextsPage } from './pages/TextsPage'
 import { SongsPage } from './pages/SongsPage'
 import { HistoryPage } from './pages/HistoryPage'
+import { DropEditorPage } from './pages/DropEditorPage'
 import type { EditorState } from './types/editor'
 
-type Page = 'dashboard' | 'templates' | 'editor' | 'texts' | 'songs' | 'history'
+type Page = 'dashboard' | 'templates' | 'editor' | 'texts' | 'songs' | 'history' | 'drops'
 
 export default function App() {
   const [page, setPage] = useState<Page>('dashboard')
@@ -45,6 +46,7 @@ export default function App() {
     texts: <TextsPage />,
     songs: <SongsPage />,
     history: <HistoryPage />,
+    drops: <DropEditorPage />,
   }[page as Exclude<Page, 'editor'>]
 
   return (

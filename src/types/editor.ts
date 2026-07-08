@@ -37,6 +37,7 @@ export interface AudioTrack {
   localUrl: string
   name: string
   startAt: number
+  trimStart: number    // seconds to skip from start of audio file (for drop sync)
   duration: number
   originalDuration: number    // full file duration (cap for right trim)
   volume: number

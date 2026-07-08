@@ -315,8 +315,14 @@ async function remuxToMp4(
     await ffmpeg.writeFile('ext_audio', await fetchFile(audio.file))
     cmd.push('-i', 'ext_audio')
 
+    const trimStart = audio.trimStart ?? 0
     const delayMs = Math.round(audio.startAt * 1000)
-    const af: string[] = ['aresample=44100']
+    const af: string[] = []
+    if (trimStart > 0) {
+      af.push(`atrim=start=${trimStart.toFixed(3)}`)
+      af.push('asetpts=PTS-STARTPTS')
+    }
+    af.push('aresample=44100')
     if (delayMs > 0) af.push(`adelay=${delayMs}|${delayMs}`)
     if (audio.fadeIn  > 0) af.push(`afade=t=in:st=${audio.startAt.toFixed(3)}:d=${audio.fadeIn.toFixed(3)}`)
     if (audio.fadeOut > 0) {

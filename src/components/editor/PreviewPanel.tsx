@@ -139,7 +139,8 @@ export function PreviewPanel({
     if (audioTime >= 0 && audioTime < audio.duration) {
       const baseVol = getVolumeAtTime(playhead, audio.keyframes, audio.volume)
       aud.volume = calcFadeVolume(audioTime, audio.duration, audio.fadeIn, audio.fadeOut, baseVol)
-      if (Math.abs(aud.currentTime - audioTime) > 0.05) aud.currentTime = audioTime
+      const targetAudTime = audioTime + (audio.trimStart ?? 0)
+      if (Math.abs(aud.currentTime - targetAudTime) > 0.05) aud.currentTime = targetAudTime
       aud.pause()
     } else {
       aud.pause()
@@ -166,7 +167,8 @@ export function PreviewPanel({
         if (audioTime >= 0 && audioTime < at.duration) {
           const baseVol = getVolumeAtTime(next, at.keyframes, at.volume)
           aud.volume = calcFadeVolume(audioTime, at.duration, at.fadeIn, at.fadeOut, baseVol)
-          if (Math.abs(aud.currentTime - audioTime) > 0.2) aud.currentTime = audioTime
+          const targetAudTime = audioTime + (at.trimStart ?? 0)
+          if (Math.abs(aud.currentTime - targetAudTime) > 0.2) aud.currentTime = targetAudTime
           if (aud.paused) aud.play().catch(() => {})
         } else {
           if (!aud.paused) aud.pause()

@@ -97,6 +97,7 @@ export function hydrateEditorState(stored: StoredEditorState): EditorState {
       ...stored.audio,
       localUrl: URL.createObjectURL(stored.audio.file),
       originalDuration: (stored.audio as any).originalDuration ?? stored.audio.duration,
+      trimStart: (stored.audio as any).trimStart ?? 0,
     } : null,
     zoom:     stored.zoom,
     playhead: 0,

@@ -108,7 +108,7 @@ function editorReducer(state: EditorState, action: Action): EditorState {
       if (!clip) return state
       const audio: AudioTrack = {
         id: crypto.randomUUID(), file: clip.file, localUrl: clip.localUrl,
-        name: `Audio · ${clip.name}`, startAt: clip.startAt, duration: clip.originalDuration,
+        name: `Audio · ${clip.name}`, startAt: clip.startAt, trimStart: 0, duration: clip.originalDuration,
         originalDuration: clip.originalDuration,
         volume: 1, fadeIn: 0, fadeOut: 0, keyframes: [],
       }

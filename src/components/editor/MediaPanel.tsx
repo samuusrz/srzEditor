@@ -6,6 +6,7 @@ import {
   getTextLibrary, createTextItem, deleteTextItem,
 } from '../../lib/db'
 import type { SongLibraryItem, TextLibraryItem } from '../../types'
+import { getDropPoint } from '../../lib/dropStorage'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -94,7 +95,7 @@ export function MediaPanel({
     onSetAudio({
       id: crypto.randomUUID(), file, localUrl,
       name: file.name.replace(/\.[^.]+$/, ''),
-      startAt: 0, duration, originalDuration: duration, volume: 1, fadeIn: 0, fadeOut: 0, keyframes: [],
+      startAt: 0, trimStart: 0, duration, originalDuration: duration, volume: 1, fadeIn: 0, fadeOut: 0, keyframes: [],
     })
   }
 
@@ -179,7 +180,7 @@ export function MediaPanel({
         <div className="flex-1 flex flex-col min-h-0">
           <SubTabBar value={subTab} onChange={setSubTab} />
           {subTab === 'library'
-            ? <AudioLibraryPane onSetAudio={onSetAudio} />
+            ? <AudioLibraryPane onSetAudio={onSetAudio} clips={clips} />
             : <AudioLocalPane audio={audio} audioInputRef={audioInputRef} songInputRef={songInputRef} onImport={importLocalAudio} onRemove={onRemoveAudio} />
           }
           <input ref={audioInputRef} type="file" accept="audio/*" className="hidden" onChange={e => importLocalAudio(e.target.files)} />
@@ -302,13 +303,23 @@ function TextLocalPane({ texts, onAddText }: { texts: TextOverlay[]; onAddText: 
 
 // ── Audio Library Pane ────────────────────────────────────────────────────────
 
-function AudioLibraryPane({ onSetAudio }: { onSetAudio: (a: AudioTrack) => void }) {
+interface PendingDropSong {
+  song: SongLibraryItem
+  dropAt: number
+  url: string
+  file: File
+  duration: number
+  localUrl: string
+}
+
+function AudioLibraryPane({ onSetAudio, clips }: { onSetAudio: (a: AudioTrack) => void; clips: Clip[] }) {
   const [songs, setSongs]   = useState<SongLibraryItem[]>([])
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [newName, setNewName]     = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
   const [pendingFile, setPendingFile] = useState<File | null>(null)
+  const [pendingDropSong, setPendingDropSong] = useState<PendingDropSong | null>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -344,16 +355,53 @@ function AudioLibraryPane({ onSetAudio }: { onSetAudio: (a: AudioTrack) => void 
     try {
       const { file, duration, localUrl } = await fetchAudioFile(url, song.name)
       const finalDuration = song.duration ?? duration
-      onSetAudio({
-        id: crypto.randomUUID(), file, localUrl, name: song.name,
-        startAt: 0, duration: finalDuration, originalDuration: finalDuration,
-        volume: 1, fadeIn: 0, fadeOut: 0, keyframes: [],
-      })
+      const dropAt = getDropPoint(song.id)
+      if (dropAt !== null && clips.length > 0) {
+        setPendingDropSong({ song, dropAt, url, file, duration: finalDuration, localUrl })
+      } else {
+        onSetAudio({
+          id: crypto.randomUUID(), file, localUrl, name: song.name,
+          startAt: 0, trimStart: 0, duration: finalDuration, originalDuration: finalDuration,
+          volume: 1, fadeIn: 0, fadeOut: 0, keyframes: [],
+        })
+      }
     } catch (e) { console.error(e) }
   }
 
+  const applyWithClip = (clip: Clip) => {
+    if (!pendingDropSong) return
+    const { dropAt, file, localUrl, duration, song } = pendingDropSong
+    const clipStart = clip.startAt
+    const trimStart = Math.max(0, dropAt - clipStart)
+    const audioStartAt = Math.max(0, clipStart - dropAt)
+    const dur = duration - trimStart
+    onSetAudio({
+      id: crypto.randomUUID(),
+      file,
+      localUrl,
+      name: song.name,
+      startAt: audioStartAt,
+      trimStart,
+      duration: Math.max(0.1, dur),
+      originalDuration: duration,
+      volume: 1, fadeIn: 0, fadeOut: 0, keyframes: [],
+    })
+    setPendingDropSong(null)
+  }
+
+  const applyWithoutSync = () => {
+    if (!pendingDropSong) return
+    const { file, localUrl, duration, song } = pendingDropSong
+    onSetAudio({
+      id: crypto.randomUUID(), file, localUrl, name: song.name,
+      startAt: 0, trimStart: 0, duration, originalDuration: duration,
+      volume: 1, fadeIn: 0, fadeOut: 0, keyframes: [],
+    })
+    setPendingDropSong(null)
+  }
+
   return (
-    <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-2">
+    <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-2 relative">
       <input ref={fileRef} type="file" accept="audio/*" className="hidden" onChange={handleFileSelect} />
 
       {/* Upload UI */}
@@ -396,6 +444,44 @@ function AudioLibraryPane({ onSetAudio }: { onSetAudio: (a: AudioTrack) => void 
         </div>
       ))}
       {!loading && songs.length === 0 && <p className="text-xs text-zinc-600 text-center mt-2">Biblioteca vacía</p>}
+
+      {/* Clip selector modal for drop sync */}
+      {pendingDropSong && (
+        <div className="absolute inset-0 bg-zinc-950/95 z-10 flex flex-col p-3 gap-2 overflow-y-auto">
+          <p className="text-xs font-semibold text-zinc-200">¿Cuál clip es el showcase?</p>
+          <p className="text-[10px] text-zinc-500 leading-tight">El Drop se sincronizará al inicio de ese clip.</p>
+          <div className="flex flex-col gap-1 mt-1">
+            {clips.map(clip => (
+              <button
+                key={clip.id}
+                onClick={() => applyWithClip(clip)}
+                className="flex items-center gap-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-lg px-2 py-1.5 cursor-pointer transition-colors text-left w-full"
+              >
+                {clip.thumbnail
+                  ? <img src={clip.thumbnail} className="w-7 h-12 object-cover rounded flex-none" alt="" />
+                  : <div className="w-7 h-12 bg-zinc-700 rounded flex-none flex items-center justify-center"><Film size={10} className="text-zinc-500" /></div>
+                }
+                <div className="min-w-0">
+                  <p className="text-xs text-zinc-200 truncate">{clip.name}</p>
+                  <p className="text-[10px] text-zinc-500">{clip.startAt.toFixed(1)}s · {clip.duration.toFixed(1)}s</p>
+                </div>
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={applyWithoutSync}
+            className="mt-1 w-full py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer border border-zinc-800 rounded-lg"
+          >
+            Sin showcase
+          </button>
+          <button
+            onClick={() => setPendingDropSong(null)}
+            className="w-full py-1 text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors cursor-pointer"
+          >
+            Cancelar
+          </button>
+        </div>
+      )}
     </div>
   )
 }

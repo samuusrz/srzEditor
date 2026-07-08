@@ -1,6 +1,6 @@
-import { LayoutTemplate, Film, Type, Music, History, Clapperboard } from 'lucide-react'
+import { LayoutTemplate, Film, Type, Music, History, Clapperboard, Zap } from 'lucide-react'
 
-type Page = 'dashboard' | 'templates' | 'editor' | 'texts' | 'songs' | 'history'
+type Page = 'dashboard' | 'templates' | 'editor' | 'texts' | 'songs' | 'history' | 'drops'
 
 interface SidebarProps {
   current: Page
@@ -14,6 +14,7 @@ const nav: { id: Page; label: string; icon: React.ReactNode }[] = [
   { id: 'texts', label: 'Textos', icon: <Type size={18} /> },
   { id: 'songs', label: 'Canciones', icon: <Music size={18} /> },
   { id: 'history', label: 'Historial', icon: <History size={18} /> },
+  { id: 'drops', label: 'Drop Editor', icon: <Zap size={18} /> },
 ]
 
 export function Sidebar({ current, onChange }: SidebarProps) {
