@@ -315,8 +315,10 @@ export function PreviewPanel({
         style={{ aspectRatio: '9/16', maxHeight: 'calc(100% - 56px)', minWidth: 0 }}
         onClick={() => onSelect(null)}
       >
-        {/* Double-buffer: only the active slot is visible */}
-        <video ref={videoARef} className="absolute inset-0 w-full h-full object-contain" playsInline style={{ opacity: activeSlot === 'a' ? 1 : 0 }} />
+        {/* Double-buffer: slot A is in-flow (sizes the container), slot B is absolute overlay.
+            Only the active slot is visible; the idle slot is transparent but present so the
+            browser keeps preloading its src. */}
+        <video ref={videoARef} className="w-full h-full object-contain" playsInline style={{ opacity: activeSlot === 'a' ? 1 : 0 }} />
         <video ref={videoBRef} className="absolute inset-0 w-full h-full object-contain" playsInline style={{ opacity: activeSlot === 'b' ? 1 : 0 }} />
 
         {/* Snap guides */}

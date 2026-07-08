@@ -258,36 +258,49 @@ async function captureToWebm(
       }
     })
 
-    // Capture frames for clip.duration seconds
+    // Capture frames for clip.duration seconds.
+    // Start wallStart AFTER play() resolves so elapsed tracks actual video time.
     await new Promise<void>(resolve => {
-      const wallStart = performance.now()
-      const frame = () => {
-        const elapsed = (performance.now() - wallStart) / 1000
-        if (elapsed >= clip.duration) {
-          vidEl.pause()
-          timelinePos = clip.startAt + clip.duration
-          onProgress({
-            step: `Procesando clip ${ci + 1}/${sortedClips.length}…`,
-            pct: 8 + Math.round((timelinePos / totalDur) * 74),
-          })
-          resolve(); return
-        }
-
-        // Draw video frame with letterbox
+      const drawFrame = (elapsed: number) => {
         if (vidEl.readyState >= 2 && vidEl.videoWidth) {
           const s  = Math.min(CANVAS_W / vidEl.videoWidth, CANVAS_H / vidEl.videoHeight)
           const sw = vidEl.videoWidth * s, sh = vidEl.videoHeight * s
           ctx.fillStyle = '#000'; ctx.fillRect(0, 0, CANVAS_W, CANVAS_H)
           ctx.drawImage(vidEl, (CANVAS_W - sw) / 2, (CANVAS_H - sh) / 2, sw, sh)
         }
-
         drawTexts(clip.startAt + elapsed)
-        requestAnimationFrame(frame)
       }
 
-      vidEl.play()
-        .then(() => requestAnimationFrame(frame))
-        .catch(() => requestAnimationFrame(frame))
+      vidEl.play().then(() => {
+        // Draw first frame immediately so MediaRecorder captures it before the
+        // first RAF tick — eliminates the black flash at the clip's start.
+        drawFrame(0)
+        const wallStart = performance.now()
+        const frame = () => {
+          const elapsed = (performance.now() - wallStart) / 1000
+          if (elapsed >= clip.duration) {
+            vidEl.pause()
+            timelinePos = clip.startAt + clip.duration
+            onProgress({
+              step: `Procesando clip ${ci + 1}/${sortedClips.length}…`,
+              pct: 8 + Math.round((timelinePos / totalDur) * 74),
+            })
+            resolve(); return
+          }
+          drawFrame(elapsed)
+          requestAnimationFrame(frame)
+        }
+        requestAnimationFrame(frame)
+      }).catch(() => {
+        const wallStart = performance.now()
+        const frame = () => {
+          const elapsed = (performance.now() - wallStart) / 1000
+          if (elapsed >= clip.duration) { vidEl.pause(); timelinePos = clip.startAt + clip.duration; resolve(); return }
+          drawFrame(elapsed)
+          requestAnimationFrame(frame)
+        }
+        requestAnimationFrame(frame)
+      })
     })
   }
 
