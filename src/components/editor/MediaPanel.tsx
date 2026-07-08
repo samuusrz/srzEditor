@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect } from 'react'
-import { Plus, Film, Type, Music, Trash2, Upload, Library, Folder, FolderOpen, ChevronRight, ChevronDown, Loader2, Check } from 'lucide-react'
+import { Plus, Film, Type, Music, Trash2, Upload, Library, Folder, FolderOpen, ChevronRight, ChevronDown, Loader2, Check, Play, Square } from 'lucide-react'
 import type { Clip, TextOverlay, AudioTrack } from '../../types/editor'
 import {
   getSongLibrary, createSongItem, deleteSongItem, getPublicUrl,
@@ -465,6 +465,9 @@ function AudioLibraryPane({ onSetAudio, clips, onPreviewClip }: {
   const [folders, setFolders]               = useState<SongFolder[]>([])
   const [collapsed, setCollapsed]           = useState<Record<string, boolean>>({})
   const [songUsage, setSongUsage]           = useState<Record<string, number>>({})
+  const [previewingId, setPreviewingId]     = useState<string | null>(null)
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null)
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -519,6 +522,32 @@ function AudioLibraryPane({ onSetAudio, clips, onPreviewClip }: {
     } catch (e) { console.error(e) }
   }
 
+  const stopPreview = () => {
+    previewAudioRef.current?.pause()
+    if (previewTimerRef.current) clearTimeout(previewTimerRef.current)
+    setPreviewingId(null)
+  }
+
+  const togglePreview = (song: SongLibraryItem) => {
+    if (previewingId === song.id) { stopPreview(); return }
+    stopPreview()
+    const dropAt = getDropPoint(song.id)
+    const ZONE = 1.5
+    const from = dropAt !== null ? Math.max(0, dropAt - ZONE) : 0
+    const until = dropAt !== null ? dropAt + ZONE : 4
+    const url = getPublicUrl(song.storage_path)
+    const audio = new Audio(url)
+    audio.currentTime = from
+    audio.onended = stopPreview
+    audio.play().catch(() => {})
+    previewAudioRef.current = audio
+    setPreviewingId(song.id)
+    previewTimerRef.current = setTimeout(() => {
+      audio.pause()
+      setPreviewingId(null)
+    }, (until - from) * 1000)
+  }
+
   const applyWithClip = (clip: Clip) => {
     if (!pendingDropSong) return
     const { dropAt, file, localUrl, duration, song } = pendingDropSong
@@ -564,24 +593,41 @@ function AudioLibraryPane({ onSetAudio, clips, onPreviewClip }: {
   const assignedIds = new Set(folders.flatMap(f => f.songIds))
   const unassigned  = sortedSongs.filter(s => !assignedIds.has(s.id))
 
-  const SongItem = ({ song }: { song: SongLibraryItem }) => (
-    <div className="group flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5">
-      {/* Cover */}
-      <div className="w-8 h-8 rounded-md overflow-hidden bg-zinc-800 flex items-center justify-center flex-none">
-        {covers[song.id]
-          ? <img src={covers[song.id]} className="w-full h-full object-cover" alt="" />
-          : <Music size={12} className="text-zinc-600" />
-        }
+  const SongItem = ({ song }: { song: SongLibraryItem }) => {
+    const isPreviewing = previewingId === song.id
+    return (
+      <div className="group flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5">
+        {/* Cover */}
+        <div className="w-8 h-8 rounded-md overflow-hidden bg-zinc-800 flex items-center justify-center flex-none">
+          {covers[song.id]
+            ? <img src={covers[song.id]} className="w-full h-full object-cover" alt="" />
+            : <Music size={12} className="text-zinc-600" />
+          }
+        </div>
+        {/* Name — click to use */}
+        <button onClick={() => useSong(song)} className="flex-1 text-left cursor-pointer hover:text-white transition-colors min-w-0">
+          <p className="text-xs text-zinc-300 truncate">{song.name}</p>
+          {song.duration && <p className="text-[10px] text-zinc-500">{song.duration.toFixed(1)}s</p>}
+        </button>
+        {/* Preview button */}
+        <button
+          onClick={e => { e.stopPropagation(); togglePreview(song) }}
+          title={isPreviewing ? 'Parar' : 'Escuchar drop'}
+          className={`w-6 h-6 rounded-md flex items-center justify-center flex-none cursor-pointer transition-colors ${
+            isPreviewing
+              ? 'bg-violet-600 text-white'
+              : 'text-zinc-600 hover:text-violet-400 hover:bg-zinc-800 opacity-0 group-hover:opacity-100'
+          }`}
+        >
+          {isPreviewing ? <Square size={9} className="fill-white" /> : <Play size={9} className="fill-current" />}
+        </button>
+        {/* Delete */}
+        <button onClick={() => removeSong(song)} className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 transition-all cursor-pointer flex-none">
+          <Trash2 size={10} />
+        </button>
       </div>
-      <button onClick={() => useSong(song)} className="flex-1 text-left cursor-pointer hover:text-white transition-colors min-w-0">
-        <p className="text-xs text-zinc-300 truncate">{song.name}</p>
-        {song.duration && <p className="text-[10px] text-zinc-500">{song.duration.toFixed(1)}s</p>}
-      </button>
-      <button onClick={() => removeSong(song)} className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 transition-all cursor-pointer flex-none">
-        <Trash2 size={10} />
-      </button>
-    </div>
-  )
+    )
+  }
 
   return (
     <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-2 relative">
