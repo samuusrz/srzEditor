@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react'
-import { LayoutTemplate, Film, Plus, Clapperboard } from 'lucide-react'
+import { useEffect, useState, useRef } from 'react'
+import { LayoutTemplate, Film, Plus, Clapperboard, Pencil, Trash2, Check, X } from 'lucide-react'
 import { getTemplates, getProjects } from '../lib/db'
 import type { Template, VideoProject } from '../types'
 import { Button } from '../components/ui/Button'
 import { StatusBadge } from '../components/ui/Badge'
-import { listProjects, loadProject, hydrateEditorState, type EditorProject } from '../lib/projectStorage'
+import { listProjects, loadProject, hydrateEditorState, deleteProject, renameProject, type EditorProject } from '../lib/projectStorage'
 import type { EditorState } from '../types/editor'
 
 type Page = 'dashboard' | 'templates' | 'editor' | 'texts' | 'songs' | 'history'
@@ -20,21 +20,52 @@ export function DashboardPage({ onNavigate, onNewEditor, onOpenProject }: Dashbo
   const [projects, setProjects] = useState<VideoProject[]>([])
   const [editorProjects, setEditorProjects] = useState<EditorProject[]>([])
   const [loading, setLoading] = useState(true)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingName, setEditingName] = useState('')
+  const editInputRef = useRef<HTMLInputElement>(null)
+
+  const refreshEditorProjects = () =>
+    listProjects().then(ps => setEditorProjects(ps)).catch(console.error)
 
   useEffect(() => {
     Promise.all([getTemplates(), getProjects()])
       .then(([t, p]) => { setTemplates(t); setProjects(p) })
       .catch(console.error)
       .finally(() => setLoading(false))
-    listProjects()
-      .then(ps => setEditorProjects(ps.slice(0, 6)))
-      .catch(console.error)
+    refreshEditorProjects()
   }, [])
 
   const handleOpenEditorProject = async (p: EditorProject) => {
+    if (editingId) return
     const proj = await loadProject(p.id).catch(() => null)
     if (!proj) return
     onOpenProject(proj.id, hydrateEditorState(proj.state))
+  }
+
+  const handleDelete = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation()
+    await deleteProject(id).catch(console.error)
+    refreshEditorProjects()
+  }
+
+  const handleStartEdit = (e: React.MouseEvent, p: EditorProject) => {
+    e.stopPropagation()
+    setEditingId(p.id)
+    setEditingName(p.name)
+    setTimeout(() => editInputRef.current?.select(), 0)
+  }
+
+  const handleConfirmEdit = async (e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    if (!editingId || !editingName.trim()) { setEditingId(null); return }
+    await renameProject(editingId, editingName.trim()).catch(console.error)
+    setEditingId(null)
+    refreshEditorProjects()
+  }
+
+  const handleCancelEdit = (e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    setEditingId(null)
   }
 
   const recentProjects = projects.slice(0, 3)
@@ -122,30 +153,68 @@ export function DashboardPage({ onNavigate, onNewEditor, onOpenProject }: Dashbo
       {editorProjects.length > 0 && (
         <div className="mb-10">
           <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wide mb-3">Ediciones recientes</h2>
-          {/* Horizontal scroll row — each card is a fixed-width 9:16 portrait thumbnail */}
           <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
             {editorProjects.map(p => (
-              <button
+              <div
                 key={p.id}
                 onClick={() => handleOpenEditorProject(p)}
-                className="group flex-none w-32 bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden text-left hover:border-violet-700 transition-all cursor-pointer"
+                className="group flex-none w-32 bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden text-left hover:border-violet-700 transition-all cursor-pointer relative"
               >
-                {/* 9:16 thumbnail — no maxHeight constraint */}
+                {/* Action buttons — visible on hover */}
+                <div
+                  className="absolute top-1.5 right-1.5 z-10 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <button
+                    onClick={e => handleStartEdit(e, p)}
+                    className="w-6 h-6 rounded-md bg-zinc-900/80 backdrop-blur flex items-center justify-center text-zinc-300 hover:text-white hover:bg-zinc-700 transition-colors cursor-pointer"
+                    title="Renombrar"
+                  >
+                    <Pencil size={11} />
+                  </button>
+                  <button
+                    onClick={e => handleDelete(e, p.id)}
+                    className="w-6 h-6 rounded-md bg-zinc-900/80 backdrop-blur flex items-center justify-center text-zinc-300 hover:text-red-400 hover:bg-zinc-700 transition-colors cursor-pointer"
+                    title="Eliminar"
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                </div>
+
+                {/* 9:16 thumbnail */}
                 <div className="bg-zinc-800 relative overflow-hidden w-full" style={{ aspectRatio: '9/16' }}>
                   {p.thumbnail
                     ? <img src={p.thumbnail} className="w-full h-full object-cover" alt="" />
                     : <div className="absolute inset-0 flex items-center justify-center text-zinc-600"><Film size={22} /></div>
                   }
                 </div>
+
                 <div className="p-2">
-                  <p className="text-xs font-medium text-zinc-200 truncate">{p.name}</p>
-                  <p className="text-[10px] text-zinc-500 mt-0.5">
-                    {new Date(p.updatedAt).toLocaleDateString('es-ES', {
-                      day: 'numeric', month: 'short',
-                    })}
-                  </p>
+                  {editingId === p.id ? (
+                    <div className="flex flex-col gap-1" onClick={e => e.stopPropagation()}>
+                      <input
+                        ref={editInputRef}
+                        value={editingName}
+                        onChange={e => setEditingName(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') handleConfirmEdit(); if (e.key === 'Escape') handleCancelEdit() }}
+                        className="w-full bg-zinc-800 border border-violet-500 rounded px-1.5 py-0.5 text-xs text-zinc-100 focus:outline-none"
+                        autoFocus
+                      />
+                      <div className="flex gap-1">
+                        <button onClick={handleConfirmEdit} className="flex-1 flex items-center justify-center gap-0.5 text-[10px] text-emerald-400 hover:text-emerald-300 cursor-pointer"><Check size={10} />OK</button>
+                        <button onClick={handleCancelEdit} className="flex-1 flex items-center justify-center gap-0.5 text-[10px] text-zinc-500 hover:text-zinc-300 cursor-pointer"><X size={10} />Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-xs font-medium text-zinc-200 truncate">{p.name}</p>
+                      <p className="text-[10px] text-zinc-500 mt-0.5">
+                        {new Date(p.updatedAt).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
+                      </p>
+                    </>
+                  )}
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         </div>

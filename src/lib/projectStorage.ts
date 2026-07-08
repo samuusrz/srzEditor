@@ -67,6 +67,12 @@ export async function deleteProject(id: string): Promise<void> {
   await idbOp(store => store.delete(id), 'readwrite')
 }
 
+export async function renameProject(id: string, name: string): Promise<void> {
+  const proj = await loadProject(id)
+  if (!proj) return
+  await idbOp(store => store.put({ ...proj, name }), 'readwrite')
+}
+
 // ── Serialisation helpers ─────────────────────────────────────────────────────
 
 export function editorStateToProject(state: EditorState, projectId: string): EditorProject {

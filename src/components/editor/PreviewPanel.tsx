@@ -66,6 +66,7 @@ export function PreviewPanel({
   // Track actual rendered preview height to scale fontSize (canvas px → screen px)
   const [previewH, setPreviewH] = useState(1)
   const [showSafeZone, setShowSafeZone] = useState(false)
+  const [safeZoneOpacity, setSafeZoneOpacity] = useState(0.8)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const fontScale = previewH / CANVAS_H  // e.g. 450/1920 ≈ 0.234
 
@@ -326,7 +327,7 @@ export function PreviewPanel({
             alt=""
             draggable={false}
             className="absolute inset-0 w-full h-full object-cover pointer-events-none select-none"
-            style={{ zIndex: 20 }}
+            style={{ zIndex: 20, opacity: safeZoneOpacity }}
           />
         )}
 
@@ -360,6 +361,15 @@ export function PreviewPanel({
         >
           <Grid2x2 size={15} />
         </button>
+        {showSafeZone && (
+          <input
+            type="range" min={0.1} max={1} step={0.05}
+            value={safeZoneOpacity}
+            onChange={e => setSafeZoneOpacity(+e.target.value)}
+            className="w-20 accent-violet-500 cursor-pointer"
+            title={`Opacidad: ${Math.round(safeZoneOpacity * 100)}%`}
+          />
+        )}
         <button
           onClick={() => wrapperRef.current?.requestFullscreen?.()}
           disabled={clips.length === 0}
