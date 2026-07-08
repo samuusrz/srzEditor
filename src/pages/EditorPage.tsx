@@ -216,6 +216,7 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
           onAddClip={addClip} onRemoveClip={removeClip}
           onAddText={handleAddText}
           onSetAudio={setAudio} onRemoveAudio={removeAudio}
+          onPreviewClip={handlePreviewClip}
         />
         <PreviewPanel
           clips={clips} texts={texts} audio={audio}

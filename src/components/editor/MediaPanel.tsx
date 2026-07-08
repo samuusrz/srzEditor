@@ -57,13 +57,14 @@ interface Props {
   onAddText: (text: TextOverlay) => void
   onSetAudio: (audio: AudioTrack) => void
   onRemoveAudio: () => void
+  onPreviewClip: (clip: Clip) => void
 }
 
 // ── component ─────────────────────────────────────────────────────────────────
 
 export function MediaPanel({
   clips, texts, audio, totalDuration,
-  onAddClip, onRemoveClip, onAddText, onSetAudio, onRemoveAudio,
+  onAddClip, onRemoveClip, onAddText, onSetAudio, onRemoveAudio, onPreviewClip,
 }: Props) {
   const [tab,    setTab]    = useState<Tab>('media')
   const [subTab, setSubTab] = useState<SubTab>('library')
@@ -114,7 +115,7 @@ export function MediaPanel({
   ]
 
   return (
-    <div className="w-56 flex-none bg-zinc-950 border-r border-zinc-800 flex flex-col">
+    <div className="w-72 flex-none bg-zinc-950 border-r border-zinc-800 flex flex-col">
       {/* Main tabs */}
       <div className="flex border-b border-zinc-800">
         {tabs.map(t => (
@@ -180,7 +181,7 @@ export function MediaPanel({
         <div className="flex-1 flex flex-col min-h-0">
           <SubTabBar value={subTab} onChange={setSubTab} />
           {subTab === 'library'
-            ? <AudioLibraryPane onSetAudio={onSetAudio} clips={clips} />
+            ? <AudioLibraryPane onSetAudio={onSetAudio} clips={clips} onPreviewClip={onPreviewClip} />
             : <AudioLocalPane audio={audio} audioInputRef={audioInputRef} songInputRef={songInputRef} onImport={importLocalAudio} onRemove={onRemoveAudio} />
           }
           <input ref={audioInputRef} type="file" accept="audio/*" className="hidden" onChange={e => importLocalAudio(e.target.files)} />
@@ -312,7 +313,11 @@ interface PendingDropSong {
   localUrl: string
 }
 
-function AudioLibraryPane({ onSetAudio, clips }: { onSetAudio: (a: AudioTrack) => void; clips: Clip[] }) {
+function AudioLibraryPane({ onSetAudio, clips, onPreviewClip }: {
+  onSetAudio: (a: AudioTrack) => void
+  clips: Clip[]
+  onPreviewClip: (clip: Clip) => void
+}) {
   const [songs, setSongs]   = useState<SongLibraryItem[]>([])
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -320,6 +325,7 @@ function AudioLibraryPane({ onSetAudio, clips }: { onSetAudio: (a: AudioTrack) =
   const fileRef = useRef<HTMLInputElement>(null)
   const [pendingFile, setPendingFile] = useState<File | null>(null)
   const [pendingDropSong, setPendingDropSong] = useState<PendingDropSong | null>(null)
+  const [selectedClip, setSelectedClip] = useState<Clip | null>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -357,6 +363,7 @@ function AudioLibraryPane({ onSetAudio, clips }: { onSetAudio: (a: AudioTrack) =
       const finalDuration = song.duration ?? duration
       const dropAt = getDropPoint(song.id)
       if (dropAt !== null && clips.length > 0) {
+        setSelectedClip(null)
         setPendingDropSong({ song, dropAt, url, file, duration: finalDuration, localUrl })
       } else {
         onSetAudio({
@@ -377,16 +384,13 @@ function AudioLibraryPane({ onSetAudio, clips }: { onSetAudio: (a: AudioTrack) =
     const dur = duration - trimStart
     onSetAudio({
       id: crypto.randomUUID(),
-      file,
-      localUrl,
-      name: song.name,
-      startAt: audioStartAt,
-      trimStart,
-      duration: Math.max(0.1, dur),
-      originalDuration: duration,
+      file, localUrl, name: song.name,
+      startAt: audioStartAt, trimStart,
+      duration: Math.max(0.1, dur), originalDuration: duration,
       volume: 1, fadeIn: 0, fadeOut: 0, keyframes: [],
     })
     setPendingDropSong(null)
+    setSelectedClip(null)
   }
 
   const applyWithoutSync = () => {
@@ -398,7 +402,16 @@ function AudioLibraryPane({ onSetAudio, clips }: { onSetAudio: (a: AudioTrack) =
       volume: 1, fadeIn: 0, fadeOut: 0, keyframes: [],
     })
     setPendingDropSong(null)
+    setSelectedClip(null)
   }
+
+  const handleSelectClip = (clip: Clip) => {
+    setSelectedClip(clip)
+    onPreviewClip(clip)
+  }
+
+  // Clips sorted by startAt (timeline order)
+  const sortedClips = [...clips].sort((a, b) => a.startAt - b.startAt)
 
   return (
     <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-2 relative">
@@ -447,39 +460,78 @@ function AudioLibraryPane({ onSetAudio, clips }: { onSetAudio: (a: AudioTrack) =
 
       {/* Clip selector modal for drop sync */}
       {pendingDropSong && (
-        <div className="absolute inset-0 bg-zinc-950/95 z-10 flex flex-col p-3 gap-2 overflow-y-auto">
-          <p className="text-xs font-semibold text-zinc-200">¿Cuál clip es el showcase?</p>
-          <p className="text-[10px] text-zinc-500 leading-tight">El Drop se sincronizará al inicio de ese clip.</p>
-          <div className="flex flex-col gap-1 mt-1">
-            {clips.map(clip => (
-              <button
-                key={clip.id}
-                onClick={() => applyWithClip(clip)}
-                className="flex items-center gap-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-lg px-2 py-1.5 cursor-pointer transition-colors text-left w-full"
-              >
-                {clip.thumbnail
-                  ? <img src={clip.thumbnail} className="w-7 h-12 object-cover rounded flex-none" alt="" />
-                  : <div className="w-7 h-12 bg-zinc-700 rounded flex-none flex items-center justify-center"><Film size={10} className="text-zinc-500" /></div>
-                }
-                <div className="min-w-0">
-                  <p className="text-xs text-zinc-200 truncate">{clip.name}</p>
-                  <p className="text-[10px] text-zinc-500">{clip.startAt.toFixed(1)}s · {clip.duration.toFixed(1)}s</p>
-                </div>
-              </button>
-            ))}
+        <div className="absolute inset-0 bg-zinc-950 z-10 flex flex-col overflow-hidden">
+          {/* Header */}
+          <div className="px-3 pt-3 pb-2 border-b border-zinc-800 flex-none">
+            <p className="text-xs font-semibold text-zinc-100">¿Cuál es el clip showcase?</p>
+            <p className="text-[10px] text-zinc-500 mt-0.5">El Drop se sincroniza al inicio del clip seleccionado.</p>
           </div>
-          <button
-            onClick={applyWithoutSync}
-            className="mt-1 w-full py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer border border-zinc-800 rounded-lg"
-          >
-            Sin showcase
-          </button>
-          <button
-            onClick={() => setPendingDropSong(null)}
-            className="w-full py-1 text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors cursor-pointer"
-          >
-            Cancelar
-          </button>
+
+          {/* Confirm / Back bar (shown when a clip is selected) */}
+          {selectedClip ? (
+            <div className="flex gap-2 px-3 py-2 border-b border-zinc-800 flex-none">
+              <button
+                onClick={() => applyWithClip(selectedClip)}
+                className="flex-1 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium rounded-lg cursor-pointer transition-colors"
+              >
+                Confirmar
+              </button>
+              <button
+                onClick={() => setSelectedClip(null)}
+                className="flex-1 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs rounded-lg cursor-pointer transition-colors"
+              >
+                Volver
+              </button>
+            </div>
+          ) : null}
+
+          {/* Clip grid */}
+          <div className="flex-1 overflow-y-auto p-2">
+            <div className="grid grid-cols-2 gap-2">
+              {sortedClips.map(clip => {
+                const isSel = selectedClip?.id === clip.id
+                return (
+                  <button
+                    key={clip.id}
+                    onClick={() => handleSelectClip(clip)}
+                    className={`relative rounded-xl overflow-hidden border-2 transition-all cursor-pointer text-left ${
+                      isSel ? 'border-violet-500 ring-2 ring-violet-500/40' : 'border-zinc-800 hover:border-zinc-600'
+                    }`}
+                  >
+                    {clip.thumbnail
+                      ? <img src={clip.thumbnail} className="w-full aspect-[9/16] object-cover" alt="" />
+                      : <div className="w-full aspect-[9/16] bg-zinc-800 flex items-center justify-center"><Film size={18} className="text-zinc-600" /></div>
+                    }
+                    {isSel && (
+                      <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-violet-600 rounded-full flex items-center justify-center">
+                        <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                      </div>
+                    )}
+                    <div className="p-1.5">
+                      <p className="text-[10px] text-zinc-200 truncate font-medium">{clip.name}</p>
+                      <p className="text-[9px] text-zinc-500">{clip.startAt.toFixed(1)}s</p>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Footer actions */}
+          <div className="px-3 pb-3 pt-2 border-t border-zinc-800 flex-none flex flex-col gap-1">
+            <button
+              onClick={applyWithoutSync}
+              className="w-full py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer border border-zinc-800 rounded-lg"
+            >
+              Sin showcase
+            </button>
+            <button
+              onClick={() => { setPendingDropSong(null); setSelectedClip(null) }}
+              className="w-full py-1 text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors cursor-pointer"
+            >
+              Cancelar
+            </button>
+          </div>
         </div>
       )}
     </div>

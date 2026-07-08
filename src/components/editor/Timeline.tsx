@@ -376,18 +376,52 @@ export function Timeline({
 
   // ── Text trim ─────────────────────────────────────────────────────────────
   const startTextTrim = (e: React.MouseEvent, text: TextOverlay, side: 'left' | 'right') => {
+    e.stopPropagation()
     onPreDrag()
     const startX = e.clientX
     const { startAt, duration } = text
-    makeDrag(ev => {
+    const track = text.track ?? 0
+    const sameTrack = texts.filter(t => t.id !== text.id && (t.track ?? 0) === track)
+    const snapThresh = 8 / zoom
+
+    const onMove = (ev: MouseEvent) => {
       const delta = (ev.clientX - startX) / zoom
+
       if (side === 'right') {
-        onTrimText(text.id, startAt, Math.max(0.1, duration + delta))
+        let newDur = Math.max(0.1, duration + delta)
+        const rightNeighbors = sameTrack.filter(n => n.startAt >= startAt + duration - 0.01)
+        let snapTarget: number | null = null
+        if (rightNeighbors.length > 0) {
+          const closestRight = Math.min(...rightNeighbors.map(n => n.startAt))
+          const rightEdge = startAt + newDur
+          if (Math.abs(closestRight - rightEdge) < snapThresh) snapTarget = closestRight
+          newDur = Math.min(newDur, closestRight - startAt)
+        }
+        setSnapLine(snapTarget)
+        onTrimText(text.id, startAt, Math.max(0.1, newDur))
       } else {
-        const newStart = Math.max(0, Math.min(startAt + duration - 0.1, startAt + delta))
-        onTrimText(text.id, newStart, duration - (newStart - startAt))
+        let newStartAt = Math.max(0, Math.min(startAt + duration - 0.1, startAt + delta))
+        const leftNeighbors = sameTrack.filter(n => n.startAt + n.duration <= startAt + 0.01)
+        let snapTarget: number | null = null
+        if (leftNeighbors.length > 0) {
+          const closestLeftEnd = Math.max(...leftNeighbors.map(n => n.startAt + n.duration))
+          if (Math.abs(closestLeftEnd - newStartAt) < snapThresh) snapTarget = closestLeftEnd
+          newStartAt = Math.max(newStartAt, closestLeftEnd)
+        }
+        setSnapLine(snapTarget)
+        const diff = newStartAt - startAt
+        onTrimText(text.id, newStartAt, Math.max(0.1, duration - diff))
       }
-    }, () => onSnapshot())(e)
+    }
+
+    const onUp = () => {
+      setSnapLine(null)
+      onSnapshot()
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
   }
 
   // ── Audio drag with snap ──────────────────────────────────────────────────
@@ -412,18 +446,45 @@ export function Timeline({
   // ── Audio trim ────────────────────────────────────────────────────────────
   const startAudioTrim = (e: React.MouseEvent, side: 'left' | 'right') => {
     if (!audio) return
+    e.stopPropagation()
     onPreDrag()
     const startX = e.clientX
     const { startAt, duration, originalDuration } = audio
-    makeDrag(ev => {
+    const snapPts = [0, ...clips.flatMap(c => [c.startAt, c.startAt + c.duration])]
+    const snapThresh = 8 / zoom
+
+    const onMove = (ev: MouseEvent) => {
       const delta = (ev.clientX - startX) / zoom
+
       if (side === 'right') {
-        onTrimAudio(startAt, Math.max(0.1, Math.min(originalDuration, duration + delta)))
+        let newDur = Math.max(0.1, Math.min(originalDuration - (audio.trimStart ?? 0), duration + delta))
+        const rightEdge = startAt + newDur
+        let snapTarget: number | null = null
+        for (const sp of snapPts) {
+          if (Math.abs(rightEdge - sp) < snapThresh) { snapTarget = sp; newDur = sp - startAt; break }
+        }
+        setSnapLine(snapTarget)
+        onTrimAudio(startAt, Math.max(0.1, newDur))
       } else {
-        const newStart = Math.max(0, Math.min(startAt + duration - 0.1, startAt + delta))
-        onTrimAudio(newStart, duration - (newStart - startAt))
+        let newStart = Math.max(0, Math.min(startAt + duration - 0.1, startAt + delta))
+        let snapTarget: number | null = null
+        for (const sp of snapPts) {
+          if (Math.abs(newStart - sp) < snapThresh) { snapTarget = sp; newStart = sp; break }
+        }
+        setSnapLine(snapTarget)
+        const diff = newStart - startAt
+        onTrimAudio(newStart, Math.max(0.1, duration - diff))
       }
-    }, () => onSnapshot())(e)
+    }
+
+    const onUp = () => {
+      setSnapLine(null)
+      onSnapshot()
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
   }
 
   // ── Volume keyframe drag ──────────────────────────────────────────────────
