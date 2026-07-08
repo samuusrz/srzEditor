@@ -45,7 +45,17 @@ export function PreviewPanel({
   onSetPlayhead, onSetPlaying, onUpdateText, onDragTextPos, onSelect, onSnapshot, onClearPreview,
   previewElRef,
 }: Props) {
-  const videoRef        = useRef<HTMLVideoElement>(null)
+  // Double-buffer: two <video> elements to avoid black flash on clip transition.
+  // videoARef / videoBRef are the actual DOM elements; videoRef is a logical
+  // pointer that always targets whichever slot is currently active. The RAF loop
+  // and audio-sync code use videoRef without needing to know which slot is live.
+  const videoARef       = useRef<HTMLVideoElement>(null)
+  const videoBRef       = useRef<HTMLVideoElement>(null)
+  const videoRef        = useRef<HTMLVideoElement | null>(null)
+  const activeSlotRef   = useRef<'a' | 'b'>('a')
+  const [activeSlot, setActiveSlot] = useState<'a' | 'b'>('a')
+  const slotSrcRef      = useRef<{ a: string; b: string }>({ a: '', b: '' })
+
   const audioRef        = useRef<HTMLAudioElement>(null)
   const previewRef      = useRef<HTMLDivElement>(null)   // inner 9:16 div (ResizeObserver, text drag)
   const wrapperRef      = useRef<HTMLDivElement>(null)   // outer container — goes fullscreen
@@ -97,27 +107,78 @@ export function PreviewPanel({
     return () => document.removeEventListener('fullscreenchange', handler)
   }, [])
 
-  // ── Sync video ──────────────────────────────────────────────────────────
+  // ── Initialise videoRef to slot A on mount ──────────────────────────────
+  useEffect(() => { videoRef.current = videoARef.current }, [])
+
+  // ── Sync video (double-buffer) ───────────────────────────────────────────
   useEffect(() => {
-    const vid = videoRef.current
-    if (!vid) return
-    if (!activeClip) { vid.pause(); return }
+    const slotKey   = activeSlotRef.current
+    const otherKey  = slotKey === 'a' ? 'b' : 'a'
+    const activeVid = slotKey === 'a' ? videoARef.current : videoBRef.current
+    const otherVid  = otherKey === 'a' ? videoARef.current : videoBRef.current
+    if (!activeVid || !otherVid) return
+
+    if (!activeClip) { activeVid.pause(); return }
 
     const targetTime = activeClip.trimStart + (playhead - activeClip.startAt)
-    vid.volume = activeClip.muted ? 0 : Math.max(0, Math.min(1, activeClip.volume))
-    vid.muted  = activeClip.muted
+    const vol = activeClip.muted ? 0 : Math.max(0, Math.min(1, activeClip.volume))
 
     if (prevClipIdRef.current !== activeClip.id) {
       prevClipIdRef.current = activeClip.id
-      vid.src = activeClip.localUrl
-      vid.load()
-      vid.currentTime = targetTime
-      if (playing) vid.play().catch(() => {})
-    } else if (!playing) {
-      vid.pause()
-      if (Math.abs(vid.currentTime - targetTime) > 0.1) vid.currentTime = targetTime
+
+      if (slotSrcRef.current[otherKey] === activeClip.localUrl) {
+        // ── Happy path: next slot already has this clip preloaded → instant swap ──
+        otherVid.volume = vol
+        otherVid.muted  = activeClip.muted
+        if (Math.abs(otherVid.currentTime - targetTime) > 0.15) otherVid.currentTime = targetTime
+        if (playing) otherVid.play().catch(() => {})
+        activeVid.pause()
+        activeSlotRef.current = otherKey
+        videoRef.current = otherVid
+        setActiveSlot(otherKey)
+      } else {
+        // ── Fallback: load into active slot (brief black on very first clip) ──
+        slotSrcRef.current[slotKey] = activeClip.localUrl
+        activeVid.volume = vol
+        activeVid.muted  = activeClip.muted
+        activeVid.src = activeClip.localUrl
+        activeVid.load()
+        activeVid.currentTime = targetTime
+        if (playing) activeVid.play().catch(() => {})
+        videoRef.current = activeVid
+      }
+    } else {
+      activeVid.volume = vol
+      activeVid.muted  = activeClip.muted
+      if (!playing) {
+        activeVid.pause()
+        if (Math.abs(activeVid.currentTime - targetTime) > 0.1) activeVid.currentTime = targetTime
+      }
     }
   }, [activeClip?.id, playhead, playing])
+
+  // ── Preload next clip into the idle slot ─────────────────────────────────
+  useEffect(() => {
+    if (!activeClip) return
+    const sortedClips = [...clips].sort((a, b) => a.startAt - b.startAt)
+    const curIdx  = sortedClips.findIndex(c => c.id === activeClip.id)
+    const nextClip = sortedClips[curIdx + 1]
+    if (!nextClip) return
+
+    const idleKey = activeSlotRef.current === 'a' ? 'b' : 'a'
+    const idleVid = idleKey === 'a' ? videoARef.current : videoBRef.current
+    if (!idleVid) return
+
+    if (slotSrcRef.current[idleKey] !== nextClip.localUrl) {
+      slotSrcRef.current[idleKey] = nextClip.localUrl
+      idleVid.src = nextClip.localUrl
+      idleVid.load()
+      // Seek to trimStart so the first frame is ready at swap time
+      idleVid.addEventListener('loadedmetadata', () => {
+        idleVid.currentTime = nextClip.trimStart
+      }, { once: true })
+    }
+  }, [activeClip?.id, clips])
 
   // ── Audio src change ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -254,7 +315,9 @@ export function PreviewPanel({
         style={{ aspectRatio: '9/16', maxHeight: 'calc(100% - 56px)', minWidth: 0 }}
         onClick={() => onSelect(null)}
       >
-        <video ref={videoRef} className="w-full h-full object-contain" playsInline />
+        {/* Double-buffer: only the active slot is visible */}
+        <video ref={videoARef} className="absolute inset-0 w-full h-full object-contain" playsInline style={{ opacity: activeSlot === 'a' ? 1 : 0 }} />
+        <video ref={videoBRef} className="absolute inset-0 w-full h-full object-contain" playsInline style={{ opacity: activeSlot === 'b' ? 1 : 0 }} />
 
         {/* Snap guides */}
         {guides.vCenter && <div className="absolute top-0 bottom-0 pointer-events-none" style={{ left: '50%', width: 1, background: 'rgba(139,92,246,0.7)' }} />}

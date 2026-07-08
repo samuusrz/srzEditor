@@ -235,8 +235,16 @@ async function captureToWebm(
       vidEl.onerror = () => settle(() => rej(new Error(`Error al cargar: ${clip.name}`)))
 
       const doSeek = () => {
-        if (clip.trimStart <= 0) { settle(res) }
-        else { vidEl.onseeked = () => settle(res); vidEl.currentTime = clip.trimStart }
+        if (clip.trimStart <= 0) {
+          // Wait until at least one frame is decoded (readyState >= HAVE_CURRENT_DATA)
+          // before resolving — resolving at loadedmetadata (readyState=1) causes a black
+          // canvas frame because no pixel data is available yet.
+          if (vidEl.readyState >= 2) { settle(res) }
+          else { vidEl.addEventListener('canplay', () => settle(res), { once: true }) }
+        } else {
+          vidEl.onseeked = () => settle(res)
+          vidEl.currentTime = clip.trimStart
+        }
       }
 
       if (vidEl.src !== clip.localUrl) {
