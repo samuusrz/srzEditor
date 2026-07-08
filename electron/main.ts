@@ -4,13 +4,15 @@ import * as fs from 'fs'
 import * as os from 'os'
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
+import { createRequire } from 'module'
 
-// ESM equivalent of __dirname
+// ESM equivalents of __dirname and require
 const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+const __dirname  = path.dirname(__filename)
+const _require   = createRequire(import.meta.url)
 
 function getFfmpegPath(): string {
-  const p = require('ffmpeg-static') as string
+  const p = _require('ffmpeg-static') as string
   return app.isPackaged ? p.replace('app.asar', 'app.asar.unpacked') : p
 }
 
