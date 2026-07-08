@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { LayoutTemplate, Film, Plus, Clapperboard, Pencil, Trash2, Check, X } from 'lucide-react'
-import { getTemplates, getProjects } from '../lib/db'
+import { getTemplates, getProjects, deleteVideoProject } from '../lib/db'
 import type { Template, VideoProject } from '../types'
 import { Button } from '../components/ui/Button'
 import { StatusBadge } from '../components/ui/Badge'
@@ -68,6 +68,12 @@ export function DashboardPage({ onNavigate, onNewEditor, onOpenProject }: Dashbo
     setEditingId(null)
   }
 
+  const handleDeleteVideoProject = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation()
+    await deleteVideoProject(id).catch(console.error)
+    setProjects(ps => ps.filter(p => p.id !== id))
+  }
+
   const recentProjects = projects.slice(0, 3)
 
   return (
@@ -130,7 +136,7 @@ export function DashboardPage({ onNavigate, onNewEditor, onOpenProject }: Dashbo
             {recentProjects.map(p => (
               <div
                 key={p.id}
-                className="flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3"
+                className="group flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3"
               >
                 <div>
                   <p className="text-sm text-zinc-200">
@@ -142,7 +148,16 @@ export function DashboardPage({ onNavigate, onNewEditor, onOpenProject }: Dashbo
                     })}
                   </p>
                 </div>
-                <StatusBadge status={p.status} />
+                <div className="flex items-center gap-2">
+                  <StatusBadge status={p.status} />
+                  <button
+                    onClick={e => handleDeleteVideoProject(e, p.id)}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity w-7 h-7 rounded-lg flex items-center justify-center text-zinc-500 hover:text-red-400 hover:bg-zinc-800 cursor-pointer"
+                    title="Eliminar proyecto"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>

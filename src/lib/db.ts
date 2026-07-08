@@ -205,6 +205,11 @@ export async function getProjects(): Promise<VideoProject[]> {
   return data
 }
 
+export async function deleteVideoProject(id: string): Promise<void> {
+  const { error } = await supabase.from('video_projects').delete().eq('id', id)
+  if (error) throw error
+}
+
 export async function createProject(templateId: string): Promise<string> {
   const { data, error } = await supabase
     .from('video_projects')
