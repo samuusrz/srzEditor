@@ -1,7 +1,7 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg'
 import { fetchFile, toBlobURL } from '@ffmpeg/util'
 import type { Clip, TextOverlay, AudioTrack } from '../types/editor'
-import { renderTextToCanvas } from './renderTextCanvas'
+import { tokenizeSegments, loadAppleEmoji } from './appleEmoji'
 
 export type RenderProgress = { step: string; pct: number }
 
@@ -24,9 +24,81 @@ async function buildFFmpeg(): Promise<FFmpeg> {
   return ffmpeg
 }
 
+// ── Sync text draw (called inside RAF loop — no awaits) ───────────────────────
+
+type Seg = { type: 'text' | 'emoji'; content: string; w: number }
+type ParsedText = { text: TextOverlay; lines: Seg[][] }
+
+/** Pre-parse all text overlays into segments + widths (needs a canvas ctx for measureText) */
+function parseTexts(texts: TextOverlay[], ctx: CanvasRenderingContext2D): ParsedText[] {
+  return texts
+    .filter(t => t.content.trim())
+    .map(t => {
+      ctx.font = `${t.bold ? 'bold ' : ''}${t.fontSize}px Arial, sans-serif`
+      const lines = t.content.split('\n').map(line => {
+        const segs: Seg[] = []
+        for (const seg of tokenizeSegments(line)) {
+          const w = seg.type === 'emoji'
+            ? t.fontSize * 1.15
+            : ctx.measureText(seg.content).width
+          segs.push({ type: seg.type, content: seg.content, w })
+        }
+        return segs
+      })
+      return { text: t, lines }
+    })
+}
+
+/** Draw one text overlay onto ctx synchronously using pre-loaded emojiCache */
+function drawTextOverlay(
+  ctx: CanvasRenderingContext2D,
+  parsed: ParsedText,
+  emojiCache: Map<string, HTMLImageElement>,
+  W: number,
+  H: number,
+) {
+  const { text: t, lines } = parsed
+  const { fontSize, bold, color } = t
+  const x = (t.x / 100) * W
+  const y = (t.y / 100) * H
+  const lineHeight = fontSize * 1.3
+  const totalH = lines.length * lineHeight
+
+  for (let li = 0; li < lines.length; li++) {
+    const segs = lines[li]
+    const lineW = segs.reduce((s, seg) => s + seg.w, 0)
+    let cx = x - lineW / 2
+    const cy = y - totalH / 2 + li * lineHeight + lineHeight * 0.72
+
+    for (const seg of segs) {
+      if (seg.type === 'text') {
+        if (!seg.content) { cx += seg.w; continue }
+        ctx.font        = `${bold ? 'bold ' : ''}${fontSize}px Arial, sans-serif`
+        ctx.strokeStyle = '#000000'
+        ctx.lineWidth   = Math.max(2, fontSize * 0.18)
+        ctx.lineJoin    = 'round'
+        ctx.miterLimit  = 2
+        ctx.strokeText(seg.content, cx, cy)
+        ctx.fillStyle   = color
+        ctx.fillText(seg.content, cx, cy)
+      } else {
+        const emojiSize = fontSize * 1.15
+        const ey = cy - emojiSize * 0.82
+        const img = emojiCache.get(seg.content)
+        if (img) {
+          ctx.drawImage(img, cx, ey, emojiSize, emojiSize)
+        } else {
+          ctx.font      = `${fontSize}px Arial, sans-serif`
+          ctx.fillStyle = color
+          ctx.fillText(seg.content, cx, cy)
+        }
+      }
+      cx += seg.w
+    }
+  }
+}
+
 // ── Phase 1: real-time canvas recording ───────────────────────────────────────
-// Records everything (video frames + text overlays + clip audio) in real-time.
-// Text overlays are rendered via canvas so Apple emoji always look correct.
 
 async function captureToWebm(
   clips: Clip[],
@@ -36,19 +108,37 @@ async function captureToWebm(
   const W = 1080, H = 1920
   const totalDur = clips.reduce((s, c) => s + c.duration, 0)
 
-  // Pre-render text overlays to canvas images (handles Apple emoji via CDN images)
-  onProgress({ step: 'Preparando textos…', pct: 3 })
-  const textEntries = await Promise.all(
-    texts
-      .filter(t => t.content.trim())
-      .map(async (t) => ({ tc: await renderTextToCanvas(t, W, H), text: t }))
-  )
-
-  // Canvas
+  // Canvas (used for measuring AND recording)
   const canvas = document.createElement('canvas')
   canvas.width = W; canvas.height = H
   const ctx = canvas.getContext('2d', { alpha: false })!
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H)
+
+  // Pre-parse text overlays (synchronous — just measures text widths)
+  const parsedTexts = parseTexts(texts, ctx)
+
+  // Collect all unique emoji across all text overlays
+  onProgress({ step: 'Preparando…', pct: 3 })
+  const allEmoji = new Set<string>()
+  for (const { lines } of parsedTexts) {
+    for (const line of lines) {
+      for (const seg of line) {
+        if (seg.type === 'emoji') allEmoji.add(seg.content)
+      }
+    }
+  }
+
+  // Pre-load all emoji in parallel (4s timeout each via loadAppleEmoji)
+  const emojiCache = new Map<string, HTMLImageElement>()
+  if (allEmoji.size > 0) {
+    await Promise.all([...allEmoji].map(e =>
+      loadAppleEmoji(e)
+        .then(img => emojiCache.set(e, img))
+        .catch(() => { /* fallback: draw as text */ })
+    ))
+  }
+
+  onProgress({ step: 'Iniciando grabación…', pct: 5 })
 
   // Web Audio API: route video element audio into the MediaRecorder stream
   const audioCtx  = new AudioContext({ sampleRate: 44100 })
@@ -56,7 +146,6 @@ async function captureToWebm(
 
   const vidEl = document.createElement('video')
   vidEl.playsInline = true
-  // Hidden in DOM — needed by some browsers for audio capture
   vidEl.style.cssText = 'position:fixed;opacity:0;pointer-events:none;top:-9999px;width:1px;height:1px'
   document.body.appendChild(vidEl)
 
@@ -73,7 +162,7 @@ async function captureToWebm(
   ])
   const recorder = new MediaRecorder(recStream, {
     mimeType,
-    videoBitsPerSecond: 10_000_000, // 10 Mbps for crisp 1080×1920
+    videoBitsPerSecond: 10_000_000,
     audioBitsPerSecond: 192_000,
   })
   const chunks: Blob[] = []
@@ -119,10 +208,13 @@ async function captureToWebm(
           ctx.drawImage(vidEl, (W - sw) / 2, (H - sh) / 2, sw, sh)
         }
 
-        // Composite active text overlays
+        // Draw active text overlays synchronously
         const now = timeline + elapsed
-        for (const { tc, text: t } of textEntries) {
-          if (now >= t.startAt && now < t.startAt + t.duration) ctx.drawImage(tc, 0, 0)
+        for (const parsed of parsedTexts) {
+          const t = parsed.text
+          if (now >= t.startAt && now < t.startAt + t.duration) {
+            drawTextOverlay(ctx, parsed, emojiCache, W, H)
+          }
         }
 
         requestAnimationFrame(frame)
@@ -145,8 +237,6 @@ async function captureToWebm(
 }
 
 // ── Phase 2: fast remux to MP4 (no video re-encode) ───────────────────────────
-// FFmpeg only does: container conversion WebM→MP4 + optional audio mixing.
-// -c:v copy means the VP9 video stream is passed through unchanged → seconds, not minutes.
 
 async function remuxToMp4(
   ffmpeg: FFmpeg,
@@ -163,7 +253,6 @@ async function remuxToMp4(
     await ffmpeg.writeFile('ext_audio', await fetchFile(audio.file))
     cmd.push('-i', 'ext_audio')
 
-    // Delay external audio to its startAt position, then apply fade
     const delayMs = Math.round(audio.startAt * 1000)
     const af: string[] = ['aresample=44100']
     if (delayMs > 0) af.push(`adelay=${delayMs}|${delayMs}`)
@@ -180,7 +269,6 @@ async function remuxToMp4(
       '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
     )
   } else {
-    // No external audio — just copy everything
     cmd.push('-c', 'copy')
   }
 
@@ -211,10 +299,8 @@ export async function renderVideoInBrowser(
   audio:  AudioTrack | null,
   onProgress: (p: RenderProgress) => void,
 ): Promise<Blob> {
-  // Phase 1 — real-time canvas recording (~same duration as the video)
   const webm = await captureToWebm(clips, texts, onProgress)
 
-  // Phase 2 — load FFmpeg + remux (fast: no video re-encode)
   onProgress({ step: 'Cargando FFmpeg…', pct: 87 })
   const ffmpeg = await buildFFmpeg()
 
