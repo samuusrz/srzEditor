@@ -531,21 +531,32 @@ function AudioLibraryPane({ onSetAudio, clips, onPreviewClip }: {
   const togglePreview = (song: SongLibraryItem) => {
     if (previewingId === song.id) { stopPreview(); return }
     stopPreview()
+
     const dropAt = getDropPoint(song.id)
     const ZONE = 1.5
-    const from = dropAt !== null ? Math.max(0, dropAt - ZONE) : 0
-    const until = dropAt !== null ? dropAt + ZONE : 4
-    const url = getPublicUrl(song.storage_path)
+    const from  = dropAt !== null ? Math.max(0, dropAt - ZONE) : 0
+    const until = dropAt !== null ? dropAt + ZONE : 5
+
+    const url   = getPublicUrl(song.storage_path)
     const audio = new Audio(url)
-    audio.currentTime = from
-    audio.onended = stopPreview
-    audio.play().catch(() => {})
+    audio.preload = 'auto'
     previewAudioRef.current = audio
     setPreviewingId(song.id)
-    previewTimerRef.current = setTimeout(() => {
-      audio.pause()
-      setPreviewingId(null)
-    }, (until - from) * 1000)
+
+    const start = () => {
+      audio.currentTime = from
+      audio.play().catch(stopPreview)
+      previewTimerRef.current = setTimeout(stopPreview, (until - from) * 1000)
+    }
+
+    audio.onended = stopPreview
+    if (from === 0) {
+      // No need to seek, just play immediately once ready
+      audio.addEventListener('canplay', start, { once: true })
+    } else {
+      // Need metadata loaded before we can seek
+      audio.addEventListener('loadedmetadata', start, { once: true })
+    }
   }
 
   const applyWithClip = (clip: Clip) => {
