@@ -215,6 +215,7 @@ function pushHistory(hist: History, newPresent: EditorState): History {
     past: [...hist.past.slice(-(MAX_HISTORY - 1)), hist.present],
     present: newPresent,
     future: [],
+    preDrag: null,
   }
 }
 
@@ -226,6 +227,7 @@ function historyReducer(hist: History, action: HistoryAction): History {
       past: hist.past.slice(0, -1),
       present: hist.past[hist.past.length - 1],
       future: [hist.present, ...hist.future.slice(0, MAX_HISTORY - 1)],
+      preDrag: null,
     }
   }
   if (action.type === 'REDO') {
@@ -234,6 +236,7 @@ function historyReducer(hist: History, action: HistoryAction): History {
       past: [...hist.past.slice(-(MAX_HISTORY - 1)), hist.present],
       present: hist.future[0],
       future: hist.future.slice(1),
+      preDrag: null,
     }
   }
 
