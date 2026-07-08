@@ -21,7 +21,7 @@ type Action =
   | { type: 'MOVE_TEXT'; id: string; startAt: number; track?: number }   // drag (not undoable)
   | { type: 'TRIM_TEXT'; id: string; startAt: number; duration: number } // drag (not undoable)
   | { type: 'RESOLVE_TEXT_CONFLICTS'; winnerId: string }                  // resolve text overlaps
-  | { type: 'MOVE_MULTI'; clips: Array<{ id: string; startAt: number }>; texts: Array<{ id: string; startAt: number }> }  // multi drag (not undoable)
+  | { type: 'MOVE_MULTI'; clips: Array<{ id: string; startAt: number; track?: number }>; texts: Array<{ id: string; startAt: number; track?: number }> }  // multi drag (not undoable)
   | { type: 'REMOVE_MULTI'; clipIds: string[]; textIds: string[] }     // undoable
   | { type: 'SET_AUDIO'; audio: AudioTrack }
   | { type: 'UPDATE_AUDIO'; patch: Partial<AudioTrack> }        // undoable (property panel)
@@ -161,8 +161,8 @@ function editorReducer(state: EditorState, action: Action): EditorState {
     case 'MOVE_MULTI': {
       let clips = state.clips
       let texts = state.texts
-      for (const m of action.clips) clips = clips.map(c => c.id === m.id ? { ...c, startAt: Math.max(0, m.startAt) } : c)
-      for (const m of action.texts) texts = texts.map(t => t.id === m.id ? { ...t, startAt: Math.max(0, m.startAt) } : t)
+      for (const m of action.clips) clips = clips.map(c => c.id === m.id ? { ...c, startAt: Math.max(0, m.startAt), ...(m.track !== undefined && { track: m.track }) } : c)
+      for (const m of action.texts) texts = texts.map(t => t.id === m.id ? { ...t, startAt: Math.max(0, m.startAt), ...(m.track !== undefined && { track: m.track }) } : t)
       return { ...state, clips, texts }
     }
     case 'REMOVE_MULTI':
@@ -308,7 +308,7 @@ export function useEditor(initialState?: EditorState) {
     trimText:       useCallback((id: string, startAt: number, duration: number) => dispatch({ type: 'TRIM_TEXT', id, startAt, duration }), []),
     resolveTextConflicts: useCallback((winnerId: string) => dispatch({ type: 'RESOLVE_TEXT_CONFLICTS', winnerId }), []),
     trimAudio:      useCallback((startAt: number, duration: number) => dispatch({ type: 'TRIM_AUDIO', startAt, duration }), []),
-    moveMulti:      useCallback((clips: Array<{id:string;startAt:number}>, texts: Array<{id:string;startAt:number}>) => dispatch({ type: 'MOVE_MULTI', clips, texts }), []),
+    moveMulti:      useCallback((clips: Array<{id:string;startAt:number;track?:number}>, texts: Array<{id:string;startAt:number;track?:number}>) => dispatch({ type: 'MOVE_MULTI', clips, texts }), []),
     removeMulti:    useCallback((clipIds: string[], textIds: string[]) => dispatch({ type: 'REMOVE_MULTI', clipIds, textIds }), []),
     setAudio:       useCallback((audio: AudioTrack) => dispatch({ type: 'SET_AUDIO', audio }), []),
     updateAudio:    useCallback((patch: Partial<AudioTrack>) => dispatch({ type: 'UPDATE_AUDIO', patch }), []),

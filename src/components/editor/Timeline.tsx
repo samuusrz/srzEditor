@@ -53,7 +53,7 @@ interface Props {
   onDragAudioPos: (startAt: number) => void
   onDragAudioKf: (keyframes: VolumeKeyframe[]) => void
   onTrimAudio: (startAt: number, duration: number) => void
-  onMoveMulti: (clipMoves: Array<{ id: string; startAt: number }>, textMoves: Array<{ id: string; startAt: number }>) => void
+  onMoveMulti: (clipMoves: Array<{ id: string; startAt: number; track?: number }>, textMoves: Array<{ id: string; startAt: number; track?: number }>) => void
   onSelect: (item: SelectedItem) => void
   onSetZoom: (z: number) => void
   onSnapshot: () => void
@@ -184,10 +184,12 @@ export function Timeline({
     if (!isMultiDrag) onSelect({ type: 'clip', id: clip.id })
 
     const origClipPos: Record<string, number> = {}
+    const origClipTrack: Record<string, number> = {}
     const origTextPos: Record<string, number> = {}
+    const origTextTrack: Record<string, number> = {}
     if (isMultiDrag && selected?.type === 'multi') {
-      for (const id of selected.clipIds) { const c = clips.find(c => c.id === id); if (c) origClipPos[id] = c.startAt }
-      for (const id of selected.textIds) { const t = texts.find(t => t.id === id); if (t) origTextPos[id] = t.startAt }
+      for (const id of selected.clipIds) { const c = clips.find(c => c.id === id); if (c) { origClipPos[id] = c.startAt; origClipTrack[id] = c.track ?? 0 } }
+      for (const id of selected.textIds) { const t = texts.find(t => t.id === id); if (t) { origTextPos[id] = t.startAt; origTextTrack[id] = t.track ?? 0 } }
     }
 
     const startX = e.clientX; const startY = e.clientY
@@ -199,6 +201,8 @@ export function Timeline({
       const delta = (ev.clientX - startX) / zoom
 
       if (isMultiDrag && selected?.type === 'multi') {
+        const maxExisting = clips.reduce((m, c) => Math.max(m, c.track ?? 0), 0)
+        const trackDelta = Math.round((ev.clientY - startY) / TRACK_H)
         const raw = Math.max(0, orig + delta)
         const otherClips = clips.filter(c => !selected.clipIds.includes(c.id) && (c.track ?? 0) === (clip.track ?? 0))
         const snapPts = [0, ...otherClips.flatMap(c => [c.startAt, c.startAt + c.duration])]
@@ -206,7 +210,11 @@ export function Timeline({
         const snappedDelta = snapped - orig
         setSnapLine(snapTarget)
         onMoveMulti(
-          selected.clipIds.map(id => ({ id, startAt: Math.max(0, (origClipPos[id] ?? 0) + snappedDelta) })),
+          selected.clipIds.map(id => ({
+            id,
+            startAt: Math.max(0, (origClipPos[id] ?? 0) + snappedDelta),
+            track: Math.max(0, Math.min(maxExisting + 1, (origClipTrack[id] ?? 0) + trackDelta)),
+          })),
           selected.textIds.map(id => ({ id, startAt: Math.max(0, (origTextPos[id] ?? 0) + snappedDelta) })),
         )
       } else {
@@ -315,9 +323,10 @@ export function Timeline({
 
     const origClipPos: Record<string, number> = {}
     const origTextPos: Record<string, number> = {}
+    const origTextTrack2: Record<string, number> = {}
     if (isMultiDrag && selected?.type === 'multi') {
       for (const id of selected.clipIds) { const c = clips.find(c => c.id === id); if (c) origClipPos[id] = c.startAt }
-      for (const id of selected.textIds) { const t = texts.find(t => t.id === id); if (t) origTextPos[id] = t.startAt }
+      for (const id of selected.textIds) { const t = texts.find(t => t.id === id); if (t) { origTextPos[id] = t.startAt; origTextTrack2[id] = t.track ?? 0 } }
     }
 
     const startX = e.clientX; const startY = e.clientY
@@ -329,6 +338,8 @@ export function Timeline({
       const delta = (ev.clientX - startX) / zoom
 
       if (isMultiDrag && selected?.type === 'multi') {
+        const maxExisting = texts.reduce((m, t) => Math.max(m, t.track ?? 0), 0)
+        const trackDelta = Math.round((ev.clientY - startY) / TRACK_H)
         const raw = Math.max(0, orig + delta)
         const otherTexts = texts.filter(t => !selected.textIds.includes(t.id) && (t.track ?? 0) === (text.track ?? 0))
         const snapPts = [0, ...otherTexts.flatMap(t => [t.startAt, t.startAt + t.duration])]
@@ -337,7 +348,11 @@ export function Timeline({
         setSnapLine(snapTarget)
         onMoveMulti(
           selected.clipIds.map(id => ({ id, startAt: Math.max(0, (origClipPos[id] ?? 0) + snappedDelta) })),
-          selected.textIds.map(id => ({ id, startAt: Math.max(0, (origTextPos[id] ?? 0) + snappedDelta) })),
+          selected.textIds.map(id => ({
+            id,
+            startAt: Math.max(0, (origTextPos[id] ?? 0) + snappedDelta),
+            track: Math.max(0, Math.min(maxExisting + 1, (origTextTrack2[id] ?? 0) + trackDelta)),
+          })),
         )
       } else {
         const maxExisting = texts.reduce((m, t) => Math.max(m, t.track ?? 0), 0)
