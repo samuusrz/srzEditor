@@ -50,6 +50,17 @@ export async function renderTextToCanvas(
     let cx  = x - lineW / 2
     const cy = y - totalH / 2 + li * lineHeight + lineHeight * 0.72 // baseline align
 
+    // ── Pre-load all emoji images in parallel ──────────────────────────────
+    const emojiImgs = new Map<string, HTMLImageElement | null>()
+    await Promise.all(
+      measured
+        .filter(m => m.type === 'emoji')
+        .map(m => loadAppleEmoji(m.content)
+          .then(img => emojiImgs.set(m.content, img))
+          .catch(() => emojiImgs.set(m.content, null))
+        )
+    )
+
     // ── Draw each segment ──────────────────────────────────────────────────
     for (const m of measured) {
       if (m.type === 'text') {
@@ -63,15 +74,13 @@ export async function renderTextToCanvas(
         ctx.fillStyle     = color
         ctx.fillText(m.content, cx, cy)
       } else {
-        // Emoji: load Apple image and draw
         const emojiSize = fontSize * 1.15
-        const ey = cy - emojiSize * 0.82 // align baseline with text
-
-        try {
-          const img = await loadAppleEmoji(m.content)
+        const ey = cy - emojiSize * 0.82
+        const img = emojiImgs.get(m.content)
+        if (img) {
           ctx.drawImage(img, cx, ey, emojiSize, emojiSize)
-        } catch {
-          // Fallback: draw as system emoji (looks native on macOS, fallback on Windows)
+        } else {
+          // Fallback: system emoji
           ctx.font      = `${fontSize}px Arial, sans-serif`
           ctx.fillStyle = color
           ctx.fillText(m.content, cx, cy)

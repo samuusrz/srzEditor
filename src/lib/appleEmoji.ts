@@ -119,7 +119,7 @@ export function tokenizeSegments(text: string): Segment[] {
 
 const imgCache = new Map<string, HTMLImageElement>()
 
-export function loadAppleEmoji(emoji: string): Promise<HTMLImageElement> {
+export function loadAppleEmoji(emoji: string, timeoutMs = 4000): Promise<HTMLImageElement> {
   const [primary, fallback] = appleEmojiUrls(emoji)
   if (imgCache.has(primary)) return Promise.resolve(imgCache.get(primary)!)
 
@@ -127,12 +127,16 @@ export function loadAppleEmoji(emoji: string): Promise<HTMLImageElement> {
     const img = new Image()
     img.crossOrigin = 'anonymous'
     let tried = false
-    img.onload  = () => { imgCache.set(primary, img); resolve(img) }
+
+    const timer = setTimeout(() => reject(new Error(`Emoji timeout: ${emoji}`)), timeoutMs)
+
+    img.onload  = () => { clearTimeout(timer); imgCache.set(primary, img); resolve(img) }
     img.onerror = () => {
       if (!tried) {
         tried = true
         img.src = fallback
       } else {
+        clearTimeout(timer)
         reject(new Error(`Emoji not found: ${emoji}`))
       }
     }
