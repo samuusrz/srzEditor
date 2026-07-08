@@ -32,20 +32,16 @@ async function buildFFmpeg(): Promise<FFmpeg> {
 type Seg = { type: 'text' | 'emoji'; content: string; w: number }
 type ParsedText = { text: TextOverlay; lines: Seg[][]; scaledFontSize: number }
 
-/**
- * Pre-parse text overlays. Measures widths on the recording canvas ctx,
- * scaling fontSize from preview pixels → canvas pixels.
- */
+/** Pre-parse text overlays. fontSize values are already in canvas pixels. */
 function parseTexts(
   texts: TextOverlay[],
   ctx: CanvasRenderingContext2D,
-  fontScale: number, // CANVAS_H / previewHeight
 ): ParsedText[] {
   return texts
     .filter(t => t.content.trim())
     .map(t => {
-      const scaledFontSize = Math.round(t.fontSize * fontScale)
-      ctx.font = `${t.bold ? 'bold ' : ''}${scaledFontSize}px Arial, sans-serif`
+      const scaledFontSize = t.fontSize
+      ctx.font = `${t.bold ? '700' : '500'} ${scaledFontSize}px "TikTok Sans", Arial, sans-serif`
       const lines = t.content.split('\n').map(line => {
         const segs: Seg[] = []
         for (const seg of tokenizeSegments(line)) {
@@ -80,9 +76,9 @@ function drawTextOverlay(
     for (const seg of segs) {
       if (seg.type === 'text') {
         if (!seg.content) { cx += seg.w; continue }
-        ctx.font        = `${t.bold ? 'bold ' : ''}${scaledFontSize}px Arial, sans-serif`
+        ctx.font        = `${t.bold ? '700' : '500'} ${scaledFontSize}px "TikTok Sans", Arial, sans-serif`
         ctx.strokeStyle = '#000000'
-        ctx.lineWidth   = Math.max(2, scaledFontSize * 0.18)
+        ctx.lineWidth   = Math.max(2, scaledFontSize * 0.06)
         ctx.lineJoin    = 'round'
         ctx.miterLimit  = 2
         ctx.strokeText(seg.content, cx, cy)
@@ -95,7 +91,7 @@ function drawTextOverlay(
         if (img) {
           ctx.drawImage(img, cx, ey, emojiSize, emojiSize)
         } else {
-          ctx.font      = `${scaledFontSize}px Arial, sans-serif`
+          ctx.font      = `500 ${scaledFontSize}px "TikTok Sans", Arial, sans-serif`
           ctx.fillStyle = t.color
           ctx.fillText(seg.content, cx, cy)
         }
@@ -110,7 +106,6 @@ function drawTextOverlay(
 async function captureToWebm(
   clips: Clip[],
   texts: TextOverlay[],
-  fontScale: number,
   onProgress: (p: RenderProgress) => void,
 ): Promise<Blob> {
   // Sort clips by their position on the timeline
@@ -124,8 +119,14 @@ async function captureToWebm(
   const ctx = canvas.getContext('2d', { alpha: false })!
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, CANVAS_W, CANVAS_H)
 
-  // Pre-parse text overlays (synchronous — just measures text widths)
-  const parsedTexts = parseTexts(texts, ctx, fontScale)
+  // Pre-load TikTok Sans so canvas uses it (not Arial fallback)
+  await Promise.all([
+    document.fonts.load(`500 80px "TikTok Sans"`),
+    document.fonts.load(`700 80px "TikTok Sans"`),
+  ]).catch(() => {})
+
+  // Pre-parse text overlays (synchronous — measures text widths)
+  const parsedTexts = parseTexts(texts, ctx)
 
   // Collect all unique emoji across all text overlays
   onProgress({ step: 'Preparando…', pct: 3 })
@@ -258,7 +259,7 @@ async function captureToWebm(
           vidEl.pause()
           timelinePos = clip.startAt + clip.duration
           onProgress({
-            step: `Grabando clip ${ci + 1}/${sortedClips.length}…`,
+            step: `Procesando clip ${ci + 1}/${sortedClips.length}…`,
             pct: 8 + Math.round((timelinePos / totalDur) * 74),
           })
           resolve(); return
@@ -353,13 +354,9 @@ export async function renderVideoInBrowser(
   clips:  Clip[],
   texts:  TextOverlay[],
   audio:  AudioTrack | null,
-  previewHeight: number,
   onProgress: (p: RenderProgress) => void,
 ): Promise<Blob> {
-  // Scale font sizes from preview CSS pixels → canvas pixels
-  const fontScale = previewHeight > 0 ? CANVAS_H / previewHeight : 1
-
-  const webm = await captureToWebm(clips, texts, fontScale, onProgress)
+  const webm = await captureToWebm(clips, texts, onProgress)
 
   onProgress({ step: 'Cargando FFmpeg…', pct: 87 })
   const ffmpeg = await buildFFmpeg()

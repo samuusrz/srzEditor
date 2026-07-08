@@ -4,6 +4,10 @@ import type { Clip, TextOverlay, AudioTrack, SelectedItem } from '../../types/ed
 import { getVolumeAtTime } from './Timeline'
 import { tokenizeSegments, appleEmojiUrl, onEmojiImgError } from '../../lib/appleEmoji'
 
+// Canvas resolution — same as export
+const CANVAS_W = 1080
+const CANVAS_H = 1920
+
 interface Props {
   clips: Clip[]
   texts: TextOverlay[]
@@ -20,7 +24,6 @@ interface Props {
   onSelect: (item: SelectedItem) => void
   onSnapshot: () => void
   onClearPreview: () => void
-  onPreviewHeight: (h: number) => void
 }
 
 function fmt(t: number) {
@@ -36,12 +39,11 @@ function calcFadeVolume(t: number, duration: number, fadeIn: number, fadeOut: nu
   return Math.max(0, Math.min(1, vol))
 }
 
-const SNAP = 2.5  // % threshold to trigger snap
+const SNAP = 2.5
 
 export function PreviewPanel({
   clips, texts, audio, playhead, playing, totalDuration, selected, previewUntil,
   onSetPlayhead, onSetPlaying, onUpdateText, onDragTextPos, onSelect, onSnapshot, onClearPreview,
-  onPreviewHeight,
 }: Props) {
   const videoRef        = useRef<HTMLVideoElement>(null)
   const audioRef        = useRef<HTMLAudioElement>(null)
@@ -60,14 +62,29 @@ export function PreviewPanel({
   previewUntilRef.current = previewUntil
   onClearPreviewRef.current = onClearPreview
 
+  // Track actual rendered preview height for the scale transform
+  const [previewH, setPreviewH] = useState(0)
+  const scale = previewH > 0 ? previewH / CANVAS_H : 0
+
   const activeClip  = clips.find(c => c.startAt <= playhead && playhead < c.startAt + c.duration) ?? null
   const activeTexts = texts.filter(t => t.startAt <= playhead && playhead < t.startAt + t.duration)
   const selTextId   = selected?.type === 'text' ? selected.id : null
 
-  // Snap guide state
   const [guides, setGuides] = useState<{
     vCenter?: boolean; hCenter?: boolean; vThird1?: boolean; vThird2?: boolean; hThird1?: boolean
   }>({})
+
+  // ── Measure preview height ──────────────────────────────────────────────
+  useEffect(() => {
+    const el = previewRef.current
+    if (!el) return
+    const ro = new ResizeObserver(entries => {
+      const h = entries[0]?.contentRect.height
+      if (h > 0) setPreviewH(h)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   // ── Sync video ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -103,7 +120,7 @@ export function PreviewPanel({
     }
   }, [audio?.localUrl])
 
-  // ── Audio seek + volume when PAUSED (scrubbing) ──────────────────────────
+  // ── Audio seek + volume when PAUSED ──────────────────────────────────────
   useEffect(() => {
     const aud = audioRef.current
     if (!aud || !audio || playing) return
@@ -131,7 +148,6 @@ export function PreviewPanel({
       lastTimeRef.current = now
       const next = playheadRef.current + dt
 
-      // Audio: volume via keyframes (every frame, using ref for latest state)
       const aud = audioRef.current
       const at  = audioTrackRef.current
       if (aud && at) {
@@ -139,7 +155,6 @@ export function PreviewPanel({
         if (audioTime >= 0 && audioTime < at.duration) {
           const baseVol = getVolumeAtTime(next, at.keyframes, at.volume)
           aud.volume = calcFadeVolume(audioTime, at.duration, at.fadeIn, at.fadeOut, baseVol)
-          // Re-sync if drift exceeds 0.2s
           if (Math.abs(aud.currentTime - audioTime) > 0.2) aud.currentTime = audioTime
           if (aud.paused) aud.play().catch(() => {})
         } else {
@@ -159,18 +174,6 @@ export function PreviewPanel({
     rafRef.current = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(rafRef.current)
   }, [playing, totalDuration])
-
-  // ── Report preview height for export font scaling ──────────────────────
-  useEffect(() => {
-    const el = previewRef.current
-    if (!el) return
-    const ro = new ResizeObserver(entries => {
-      const h = entries[0]?.contentRect.height
-      if (h > 0) onPreviewHeight(h)
-    })
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [onPreviewHeight])
 
   // ── Text drag with snap guides ──────────────────────────────────────────
   const startTextDrag = useCallback((e: React.MouseEvent, text: TextOverlay) => {
@@ -210,15 +213,18 @@ export function PreviewPanel({
     e.stopPropagation()
     const startY = e.clientY
     const origFs = text.fontSize
-    const onMove = (ev: MouseEvent) => onUpdateText(text.id, { fontSize: Math.max(8, Math.round(origFs + (ev.clientY - startY) * 0.4)) })
-    const onUp   = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
+    // scale factor so 1px drag ≈ meaningful canvas-pixel change
+    const dragScale = previewH > 0 ? CANVAS_H / previewH : 4
+    const onMove = (ev: MouseEvent) => {
+      onUpdateText(text.id, { fontSize: Math.max(20, Math.round(origFs + (ev.clientY - startY) * dragScale * 0.4)) })
+    }
+    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
-  }, [onUpdateText])
+  }, [onUpdateText, previewH])
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center bg-zinc-950 gap-3 py-4 min-h-0">
-      {/* Hidden audio element for audio track */}
       <audio ref={audioRef} preload="auto" />
 
       {/* 9:16 preview */}
@@ -228,79 +234,93 @@ export function PreviewPanel({
         style={{ aspectRatio: '9/16', maxHeight: 'calc(100% - 56px)', minWidth: 0 }}
         onClick={() => onSelect(null)}
       >
-        <video ref={videoRef} className="w-full h-full object-contain" playsInline />
+        {/* Inner div at canvas resolution, scaled to fit the container */}
+        <div style={{
+          position: 'absolute', top: 0, left: 0,
+          width: CANVAS_W, height: CANVAS_H,
+          transform: `scale(${scale})`,
+          transformOrigin: 'top left',
+          opacity: scale > 0 ? 1 : 0,
+        }}>
+          <video ref={videoRef} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} playsInline />
 
-        {/* Snap guides */}
-        {guides.vCenter && <div className="absolute top-0 bottom-0 pointer-events-none" style={{ left: '50%', width: 1, background: 'rgba(139,92,246,0.7)' }} />}
-        {guides.hCenter && <div className="absolute left-0 right-0 pointer-events-none" style={{ top: '50%', height: 1, background: 'rgba(139,92,246,0.7)' }} />}
-        {guides.vThird1 && <div className="absolute top-0 bottom-0 pointer-events-none" style={{ left: '33.3%', width: 1, background: 'rgba(139,92,246,0.45)' }} />}
-        {guides.vThird2 && <div className="absolute top-0 bottom-0 pointer-events-none" style={{ left: '66.7%', width: 1, background: 'rgba(139,92,246,0.45)' }} />}
-        {guides.hThird1 && <div className="absolute left-0 right-0 pointer-events-none" style={{ top: '33.3%', height: 1, background: 'rgba(139,92,246,0.45)' }} />}
+          {/* Snap guides */}
+          {guides.vCenter && <div style={{ position: 'absolute', top: 0, bottom: 0, left: '50%', width: 1, background: 'rgba(139,92,246,0.7)', pointerEvents: 'none' }} />}
+          {guides.hCenter && <div style={{ position: 'absolute', left: 0, right: 0, top: '50%', height: 1, background: 'rgba(139,92,246,0.7)', pointerEvents: 'none' }} />}
+          {guides.vThird1 && <div style={{ position: 'absolute', top: 0, bottom: 0, left: '33.3%', width: 1, background: 'rgba(139,92,246,0.45)', pointerEvents: 'none' }} />}
+          {guides.vThird2 && <div style={{ position: 'absolute', top: 0, bottom: 0, left: '66.7%', width: 1, background: 'rgba(139,92,246,0.45)', pointerEvents: 'none' }} />}
+          {guides.hThird1 && <div style={{ position: 'absolute', left: 0, right: 0, top: '33.3%', height: 1, background: 'rgba(139,92,246,0.45)', pointerEvents: 'none' }} />}
 
-        {/* Text overlays */}
-        {activeTexts.map(t => {
-          const isSelected = t.id === selTextId
-          const lines = t.content.split('\n')
-          return (
-            <div
-              key={t.id}
-              className={`absolute ${isSelected ? 'outline outline-2 outline-violet-400 outline-offset-2 rounded-sm' : ''}`}
-              style={{ left: `${t.x}%`, top: `${t.y}%`, transform: 'translate(-50%,-50%)', cursor: 'move', userSelect: 'none' }}
-              onMouseDown={e => startTextDrag(e, t)}
-              onClick={e => { e.stopPropagation(); onSelect({ type: 'text', id: t.id }) }}
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.2 }}>
-                {lines.map((line, li) => {
-                  const segs = tokenizeSegments(line)
-                  return (
-                    <div key={li} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      {segs.map((seg, si) =>
-                        seg.type === 'emoji' ? (
-                          <img
-                            key={`emoji-${si}-${seg.content}`}
-                            src={appleEmojiUrl(seg.content)}
-                            alt={seg.content}
-                            draggable={false}
-                            onError={e => onEmojiImgError(e, seg.content)}
-                            style={{ height: t.fontSize * 1.15, width: t.fontSize * 1.15, verticalAlign: 'middle', display: 'inline-block' }}
-                          />
-                        ) : (
-                          <span
-                            key={si}
-                            style={{
-                              fontSize: t.fontSize,
-                              color: t.color,
-                              fontWeight: t.bold ? 'bold' : 500,
-                              fontFamily: "'TikTok Sans', sans-serif",
-                              WebkitTextStroke: '4px #000',
-                              paintOrder: 'stroke fill',
-                              whiteSpace: 'pre',
-                            }}
-                          >
-                            {seg.content}
-                          </span>
-                        )
-                      )}
-                    </div>
-                  )
-                })}
+          {/* Text overlays — positioned in 1080×1920 canvas space */}
+          {activeTexts.map(t => {
+            const isSelected = t.id === selTextId
+            const lines = t.content.split('\n')
+            return (
+              <div
+                key={t.id}
+                className={isSelected ? 'outline outline-2 outline-violet-400 outline-offset-2 rounded-sm' : ''}
+                style={{
+                  position: 'absolute',
+                  left: `${t.x}%`, top: `${t.y}%`,
+                  transform: 'translate(-50%,-50%)',
+                  cursor: 'move', userSelect: 'none',
+                }}
+                onMouseDown={e => startTextDrag(e, t)}
+                onClick={e => { e.stopPropagation(); onSelect({ type: 'text', id: t.id }) }}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.2 }}>
+                  {lines.map((line, li) => {
+                    const segs = tokenizeSegments(line)
+                    return (
+                      <div key={li} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {segs.map((seg, si) =>
+                          seg.type === 'emoji' ? (
+                            <img
+                              key={`emoji-${si}-${seg.content}`}
+                              src={appleEmojiUrl(seg.content)}
+                              alt={seg.content}
+                              draggable={false}
+                              onError={e => onEmojiImgError(e, seg.content)}
+                              style={{ height: t.fontSize * 1.15, width: t.fontSize * 1.15, verticalAlign: 'middle', display: 'inline-block' }}
+                            />
+                          ) : (
+                            <span
+                              key={si}
+                              style={{
+                                fontSize: t.fontSize,
+                                color: t.color,
+                                fontWeight: t.bold ? 700 : 500,
+                                fontFamily: "'TikTok Sans', sans-serif",
+                                WebkitTextStroke: `${Math.max(1, t.fontSize * 0.06)}px #000`,
+                                paintOrder: 'stroke fill',
+                                whiteSpace: 'pre',
+                              }}
+                            >
+                              {seg.content}
+                            </span>
+                          )
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+                {isSelected && (
+                  <div
+                    style={{ position: 'absolute', bottom: -8, right: -8, width: 16, height: 16, background: '#8b5cf6', borderRadius: '50%', border: '2px solid white', cursor: 'se-resize', zIndex: 10 }}
+                    onMouseDown={e => startTextResize(e, t)}
+                  />
+                )}
               </div>
-              {isSelected && (
-                <div
-                  className="absolute -bottom-2 -right-2 w-4 h-4 bg-violet-500 rounded-full border-2 border-white cursor-se-resize z-10"
-                  onMouseDown={e => startTextResize(e, t)}
-                />
-              )}
-            </div>
-          )
-        })}
+            )
+          })}
 
-        {clips.length === 0 && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-700 gap-2">
-            <Film size={32} />
-            <p className="text-sm">Importa clips para empezar</p>
-          </div>
-        )}
+          {clips.length === 0 && (
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#3f3f46', gap: 8 }}>
+              <Film size={32} />
+              <p style={{ fontSize: 14 }}>Importa clips para empezar</p>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Controls */}

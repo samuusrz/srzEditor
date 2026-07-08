@@ -7,13 +7,12 @@ interface Props {
   clips: Clip[]
   texts: TextOverlay[]
   audio: AudioTrack | null
-  previewHeight: number
   onClose: () => void
 }
 
 type Status = 'idle' | 'rendering' | 'done' | 'error'
 
-export function ExportModal({ clips, texts, audio, previewHeight, onClose }: Props) {
+export function ExportModal({ clips, texts, audio, onClose }: Props) {
   const [status, setStatus]   = useState<Status>('idle')
   const [progress, setProgress] = useState('')
   const [pct, setPct]         = useState(0)
@@ -26,7 +25,7 @@ export function ExportModal({ clips, texts, audio, previewHeight, onClose }: Pro
     setPct(0)
     try {
       const blob = await renderVideoInBrowser(
-        clips, texts, audio, previewHeight,
+        clips, texts, audio,
         ({ step, pct }) => { setProgress(step); setPct(pct) },
       )
       setVideoUrl(URL.createObjectURL(blob))

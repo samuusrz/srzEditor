@@ -244,7 +244,7 @@ function TextProps({
 
       <div>
         <Label>Tamaño ({text.fontSize}px)</Label>
-        <input type="range" min={10} max={200}
+        <input type="range" min={20} max={800}
           value={text.fontSize}
           onChange={e => onUpdate(text.id, { fontSize: +e.target.value })}
           className="w-full accent-violet-500"
