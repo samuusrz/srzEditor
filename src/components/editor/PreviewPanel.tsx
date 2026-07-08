@@ -47,7 +47,8 @@ export function PreviewPanel({
 }: Props) {
   const videoRef        = useRef<HTMLVideoElement>(null)
   const audioRef        = useRef<HTMLAudioElement>(null)
-  const previewRef      = useRef<HTMLDivElement>(null)
+  const previewRef      = useRef<HTMLDivElement>(null)   // inner 9:16 div (ResizeObserver, text drag)
+  const wrapperRef      = useRef<HTMLDivElement>(null)   // outer container — goes fullscreen
   const playheadRef     = useRef(playhead)
   const audioTrackRef   = useRef(audio)
   const rafRef          = useRef(0)
@@ -65,6 +66,7 @@ export function PreviewPanel({
   // Track actual rendered preview height to scale fontSize (canvas px → screen px)
   const [previewH, setPreviewH] = useState(1)
   const [showSafeZone, setShowSafeZone] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
   const fontScale = previewH / CANVAS_H  // e.g. 450/1920 ≈ 0.234
 
   const activeClip  = clips.find(c => c.startAt <= playhead && playhead < c.startAt + c.duration) ?? null
@@ -85,6 +87,13 @@ export function PreviewPanel({
     })
     ro.observe(el)
     return () => ro.disconnect()
+  }, [])
+
+  // ── Track fullscreen state ───────────────────────────────────────────────
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', handler)
+    return () => document.removeEventListener('fullscreenchange', handler)
   }, [])
 
   // ── Sync video ──────────────────────────────────────────────────────────
@@ -225,12 +234,19 @@ export function PreviewPanel({
   }, [onUpdateText, previewH])
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center bg-zinc-950 gap-3 py-4 min-h-0">
+    <div
+      ref={el => {
+        (wrapperRef as React.MutableRefObject<HTMLDivElement | null>).current = el
+        if (previewElRef) (previewElRef as React.MutableRefObject<HTMLDivElement | null>).current = el
+      }}
+      className="flex-1 flex flex-col items-center justify-center bg-zinc-950 gap-3 py-4 min-h-0"
+      style={isFullscreen ? { background: '#000', padding: '12px 0 8px' } : undefined}
+    >
       <audio ref={audioRef} preload="auto" />
 
       {/* 9:16 preview */}
       <div
-        ref={el => { (previewRef as React.MutableRefObject<HTMLDivElement | null>).current = el; if (previewElRef) (previewElRef as React.MutableRefObject<HTMLDivElement | null>).current = el }}
+        ref={previewRef}
         className="relative bg-black rounded-xl overflow-hidden border border-zinc-800 shadow-2xl flex-shrink"
         style={{ aspectRatio: '9/16', maxHeight: 'calc(100% - 56px)', minWidth: 0 }}
         onClick={() => onSelect(null)}
@@ -345,7 +361,7 @@ export function PreviewPanel({
           <Grid2x2 size={15} />
         </button>
         <button
-          onClick={() => previewRef.current?.requestFullscreen?.()}
+          onClick={() => wrapperRef.current?.requestFullscreen?.()}
           disabled={clips.length === 0}
           className="text-zinc-500 hover:text-zinc-200 transition-colors disabled:opacity-30 cursor-pointer ml-1"
           title="Pantalla completa"
