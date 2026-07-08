@@ -142,24 +142,31 @@ async function captureToWebm(
 
   // Web Audio API: route video element audio into the MediaRecorder stream
   const audioCtx  = new AudioContext({ sampleRate: 44100 })
+  // Resume in case AudioContext is suspended after async emoji loading
+  if (audioCtx.state === 'suspended') await audioCtx.resume().catch(() => {})
   const audioDest = audioCtx.createMediaStreamDestination()
 
   const vidEl = document.createElement('video')
   vidEl.playsInline = true
+  vidEl.muted = false
   vidEl.style.cssText = 'position:fixed;opacity:0;pointer-events:none;top:-9999px;width:1px;height:1px'
   document.body.appendChild(vidEl)
 
-  const vidSrc   = audioCtx.createMediaElementSource(vidEl)
-  const clipGain = audioCtx.createGain()
-  vidSrc.connect(clipGain)
-  clipGain.connect(audioDest)
+  let clipGain: GainNode | null = null
+  try {
+    const vidSrc = audioCtx.createMediaElementSource(vidEl)
+    clipGain = audioCtx.createGain()
+    vidSrc.connect(clipGain)
+    clipGain.connect(audioDest)
+  } catch {
+    // Audio routing failed — record video only (silent)
+  }
 
   // MediaRecorder
   const mimeType = pickMimeType()
-  const recStream = new MediaStream([
-    ...canvas.captureStream(30).getVideoTracks(),
-    ...audioDest.stream.getAudioTracks(),
-  ])
+  const videoTracks = canvas.captureStream(30).getVideoTracks()
+  const audioTracks = clipGain ? audioDest.stream.getAudioTracks() : []
+  const recStream = new MediaStream([...videoTracks, ...audioTracks])
   const recorder = new MediaRecorder(recStream, {
     mimeType,
     videoBitsPerSecond: 10_000_000,
@@ -173,15 +180,40 @@ async function captureToWebm(
   let timeline = 0
   for (let ci = 0; ci < clips.length; ci++) {
     const clip = clips[ci]
-    clipGain.gain.value = clip.muted ? 0 : clip.volume
+    if (clipGain) clipGain.gain.value = clip.muted ? 0 : clip.volume
 
-    // Load & seek
+    // Load & seek — wait for loadedmetadata before seeking
     await new Promise<void>((res, rej) => {
-      const done = (fn: () => void) => { vidEl.onseeked = null; vidEl.onerror = null; fn() }
-      vidEl.onseeked = () => done(res)
-      vidEl.onerror  = () => done(() => rej(new Error(`Error al cargar: ${clip.name}`)))
-      if (vidEl.src !== clip.localUrl) { vidEl.src = clip.localUrl; vidEl.load() }
-      vidEl.currentTime = clip.trimStart
+      let settled = false
+      const settle = (fn: () => void) => {
+        if (settled) return; settled = true
+        vidEl.onseeked = null; vidEl.onerror = null; vidEl.onloadedmetadata = null
+        clearTimeout(safetyTimer)
+        fn()
+      }
+      // Safety net: never hang more than 15s per clip
+      const safetyTimer = setTimeout(() => settle(res), 15_000)
+
+      vidEl.onerror = () => settle(() => rej(new Error(`Error al cargar: ${clip.name}`)))
+
+      const doSeek = () => {
+        if (clip.trimStart <= 0) {
+          settle(res)
+        } else {
+          vidEl.onseeked = () => settle(res)
+          vidEl.currentTime = clip.trimStart
+        }
+      }
+
+      if (vidEl.src !== clip.localUrl) {
+        vidEl.onloadedmetadata = doSeek
+        vidEl.src = clip.localUrl
+        vidEl.load()
+      } else if (vidEl.readyState >= 1) {
+        doSeek()
+      } else {
+        vidEl.onloadedmetadata = doSeek
+      }
     })
 
     // Capture frames for clip.duration seconds
