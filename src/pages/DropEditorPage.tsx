@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Music, Check, Play, Pause, Save, Zap } from 'lucide-react'
+import { Music, Check, Play, Pause, Save, Zap, AudioWaveform } from 'lucide-react'
 import { getSongLibrary, getPublicUrl } from '../lib/db'
 import type { SongLibraryItem } from '../types'
 import { setDropPoint, getAllDropPoints } from '../lib/dropStorage'
@@ -109,8 +109,9 @@ function WaveformEditor({ song, initialDrop, onSave }: {
   const [audioUrl,    setAudioUrl]    = useState<string | null>(null)
   const [saved,       setSaved]       = useState(false)
 
-  const rafRef = useRef(0)
-  const remoteUrl = getPublicUrl(song.storage_path)
+  const rafRef        = useRef(0)
+  const previewUntil  = useRef<number | null>(null)
+  const remoteUrl     = getPublicUrl(song.storage_path)
 
   // ── Fetch once → blob URL (audio element) + decode (waveform) ─────────────
   useEffect(() => {
@@ -208,7 +209,15 @@ function WaveformEditor({ song, initialDrop, onSave }: {
     if (!playing) return
     const tick = () => {
       const aud = audioRef.current
-      if (aud) setCurrentTime(aud.currentTime)
+      if (aud) {
+        setCurrentTime(aud.currentTime)
+        if (previewUntil.current !== null && aud.currentTime >= previewUntil.current) {
+          aud.pause()
+          previewUntil.current = null
+          setPlaying(false)
+          return
+        }
+      }
       rafRef.current = requestAnimationFrame(tick)
     }
     rafRef.current = requestAnimationFrame(tick)
@@ -245,6 +254,7 @@ function WaveformEditor({ song, initialDrop, onSave }: {
     if (!aud) return
     if (playing) {
       aud.pause()
+      previewUntil.current = null
       setPlaying(false)
     } else {
       try {
@@ -252,6 +262,21 @@ function WaveformEditor({ song, initialDrop, onSave }: {
         setPlaying(true)
       } catch { /* autoplay denied or not loaded yet */ }
     }
+  }
+
+  const previewDrop = async () => {
+    const aud = audioRef.current
+    if (!aud) return
+    const ZONE = 1.5
+    const from = Math.max(0, dropAt - ZONE)
+    const to   = Math.min(durationRef.current, dropAt + ZONE)
+    aud.currentTime = from
+    setCurrentTime(from)
+    previewUntil.current = to
+    try {
+      await aud.play()
+      setPlaying(true)
+    } catch { previewUntil.current = null }
   }
 
   const handleSave = () => {
@@ -306,8 +331,17 @@ function WaveformEditor({ song, initialDrop, onSave }: {
           onClick={togglePlay}
           disabled={loadingWav}
           className="w-10 h-10 rounded-full bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 flex items-center justify-center text-zinc-200 transition-colors cursor-pointer flex-none"
+          title="Play / Pause"
         >
-          {playing ? <Pause size={16} /> : <Play size={16} />}
+          {playing && previewUntil.current === null ? <Pause size={16} /> : <Play size={16} />}
+        </button>
+        <button
+          onClick={previewDrop}
+          disabled={loadingWav}
+          className="w-10 h-10 rounded-full bg-violet-900/60 hover:bg-violet-800/80 disabled:opacity-40 flex items-center justify-center text-violet-300 transition-colors cursor-pointer flex-none"
+          title="Escuchar zona del Drop (±1.5s)"
+        >
+          <AudioWaveform size={16} />
         </button>
         <span className="text-xs font-mono text-zinc-500 tabular-nums">
           {fmt(currentTime)} / {fmt(duration)}
