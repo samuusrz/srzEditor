@@ -1,5 +1,5 @@
 import { useRef, useEffect, useCallback, useState } from 'react'
-import { Play, Pause, SkipBack, Film, Maximize2 } from 'lucide-react'
+import { Play, Pause, SkipBack, Film, Maximize2, Grid2x2 } from 'lucide-react'
 import type { Clip, TextOverlay, AudioTrack, SelectedItem } from '../../types/editor'
 import { getVolumeAtTime } from './Timeline'
 import { tokenizeSegments, appleEmojiUrl, onEmojiImgError } from '../../lib/appleEmoji'
@@ -64,6 +64,7 @@ export function PreviewPanel({
 
   // Track actual rendered preview height to scale fontSize (canvas px → screen px)
   const [previewH, setPreviewH] = useState(1)
+  const [showSafeZone, setShowSafeZone] = useState(false)
   const fontScale = previewH / CANVAS_H  // e.g. 450/1920 ≈ 0.234
 
   const activeClip  = clips.find(c => c.startAt <= playhead && playhead < c.startAt + c.duration) ?? null
@@ -302,6 +303,17 @@ export function PreviewPanel({
           )
         })}
 
+        {/* Safe zone guide — editor-only overlay, never exported */}
+        {showSafeZone && (
+          <img
+            src="/zonasegura.png"
+            alt=""
+            draggable={false}
+            className="absolute inset-0 w-full h-full object-cover pointer-events-none select-none"
+            style={{ zIndex: 20 }}
+          />
+        )}
+
         {clips.length === 0 && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-700 gap-2">
             <Film size={32} />
@@ -325,6 +337,13 @@ export function PreviewPanel({
         <span className="text-xs font-mono text-zinc-400 tabular-nums">
           {fmt(playhead)} / {fmt(totalDuration)}
         </span>
+        <button
+          onClick={() => setShowSafeZone(v => !v)}
+          className={`transition-colors cursor-pointer ml-1 ${showSafeZone ? 'text-violet-400' : 'text-zinc-500 hover:text-zinc-200'}`}
+          title="Zona segura (solo editor)"
+        >
+          <Grid2x2 size={15} />
+        </button>
         <button
           onClick={() => previewRef.current?.requestFullscreen?.()}
           disabled={clips.length === 0}
