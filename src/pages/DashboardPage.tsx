@@ -1,25 +1,15 @@
 import { useEffect, useState, useRef } from 'react'
-import { LayoutTemplate, Film, Plus, Clapperboard, Pencil, Trash2, Check, X } from 'lucide-react'
-import { getTemplates, getProjects, deleteVideoProject } from '../lib/db'
-import type { Template, VideoProject } from '../types'
-import { Button } from '../components/ui/Button'
-import { StatusBadge } from '../components/ui/Badge'
+import { Film, Plus, Clapperboard, Pencil, Trash2, Check, X } from 'lucide-react'
 import { listProjects, loadProject, hydrateEditorState, deleteProject, renameProject, type EditorProject } from '../lib/projectStorage'
 import type { EditorState } from '../types/editor'
 
-type Page = 'dashboard' | 'templates' | 'editor' | 'texts' | 'songs' | 'history'
-
 interface DashboardPageProps {
-  onNavigate: (page: Page) => void
   onNewEditor: () => void
   onOpenProject: (id: string, state: EditorState) => void
 }
 
-export function DashboardPage({ onNavigate, onNewEditor, onOpenProject }: DashboardPageProps) {
-  const [templates, setTemplates] = useState<Template[]>([])
-  const [projects, setProjects] = useState<VideoProject[]>([])
+export function DashboardPage({ onNewEditor, onOpenProject }: DashboardPageProps) {
   const [editorProjects, setEditorProjects] = useState<EditorProject[]>([])
-  const [loading, setLoading] = useState(true)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
   const editInputRef = useRef<HTMLInputElement>(null)
@@ -27,13 +17,7 @@ export function DashboardPage({ onNavigate, onNewEditor, onOpenProject }: Dashbo
   const refreshEditorProjects = () =>
     listProjects().then(ps => setEditorProjects(ps)).catch(console.error)
 
-  useEffect(() => {
-    Promise.all([getTemplates(), getProjects()])
-      .then(([t, p]) => { setTemplates(t); setProjects(p) })
-      .catch(console.error)
-      .finally(() => setLoading(false))
-    refreshEditorProjects()
-  }, [])
+  useEffect(() => { refreshEditorProjects() }, [])
 
   const handleOpenEditorProject = async (p: EditorProject) => {
     if (editingId) return
@@ -68,14 +52,6 @@ export function DashboardPage({ onNavigate, onNewEditor, onOpenProject }: Dashbo
     setEditingId(null)
   }
 
-  const handleDeleteVideoProject = async (e: React.MouseEvent, id: string) => {
-    e.stopPropagation()
-    await deleteVideoProject(id).catch(console.error)
-    setProjects(ps => ps.filter(p => p.id !== id))
-  }
-
-  const recentProjects = projects.slice(0, 3)
-
   return (
     <div className="p-8 max-w-4xl">
       <div className="mb-8">
@@ -83,90 +59,38 @@ export function DashboardPage({ onNavigate, onNewEditor, onOpenProject }: Dashbo
         <p className="text-zinc-500 text-sm mt-1">Monta vídeos de dropshipping orgánico en minutos.</p>
       </div>
 
-      {/* Quick actions */}
-      <div className="grid grid-cols-2 gap-4 mb-10">
-        <button
-          onClick={() => onNavigate('templates')}
-          className="group bg-zinc-900 border border-zinc-800 rounded-xl p-5 text-left hover:border-violet-700 hover:bg-zinc-800/60 transition-all cursor-pointer"
-        >
-          <div className="w-10 h-10 bg-violet-900/40 rounded-lg flex items-center justify-center mb-3 group-hover:bg-violet-800/50 transition-colors">
-            <LayoutTemplate size={20} className="text-violet-400" />
-          </div>
-          <p className="font-semibold text-zinc-100 text-sm">Crear plantilla</p>
-          <p className="text-zinc-500 text-xs mt-0.5">Define estructura, slots y timing</p>
-        </button>
-
+      {/* Quick action */}
+      <div className="mb-10">
         <button
           onClick={onNewEditor}
-          className="group bg-zinc-900 border border-zinc-800 rounded-xl p-5 text-left hover:border-violet-700 hover:bg-zinc-800/60 transition-all cursor-pointer"
+          className="group bg-zinc-900 border border-zinc-800 rounded-xl p-5 text-left hover:border-violet-700 hover:bg-zinc-800/60 transition-all cursor-pointer w-64"
         >
           <div className="w-10 h-10 bg-violet-900/40 rounded-lg flex items-center justify-center mb-3 group-hover:bg-violet-800/50 transition-colors">
             <Film size={20} className="text-violet-400" />
           </div>
-          <p className="font-semibold text-zinc-100 text-sm">Editar vídeo</p>
-          <p className="text-zinc-500 text-xs mt-0.5">Elige plantilla, sube clips, exporta</p>
+          <p className="font-semibold text-zinc-100 text-sm">Nuevo vídeo</p>
+          <p className="text-zinc-500 text-xs mt-0.5">Sube clips, añade texto y exporta</p>
         </button>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4 mb-10">
+      <div className="grid grid-cols-2 gap-4 mb-10">
         {[
-          { label: 'Plantillas', value: templates.length, icon: <LayoutTemplate size={16} /> },
-          { label: 'Proyectos', value: projects.length, icon: <Film size={16} /> },
-          { label: 'Exportados', value: projects.filter(p => p.status === 'done').length, icon: <Clapperboard size={16} /> },
+          { label: 'Ediciones', value: editorProjects.length, icon: <Film size={16} /> },
+          { label: 'Exportados', value: editorProjects.filter(p => p.thumbnail).length, icon: <Clapperboard size={16} /> },
         ].map(s => (
           <div key={s.label} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
             <div className="flex items-center gap-2 text-zinc-500 text-xs mb-2">
-              {s.icon}
-              {s.label}
+              {s.icon}{s.label}
             </div>
-            <p className="text-2xl font-bold text-zinc-100">{loading ? '—' : s.value}</p>
+            <p className="text-2xl font-bold text-zinc-100">{s.value}</p>
           </div>
         ))}
       </div>
 
-      {/* Recent projects */}
-      {recentProjects.length > 0 && (
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wide">Proyectos recientes</h2>
-            <Button variant="ghost" size="sm" onClick={() => onNavigate('history')}>Ver todos</Button>
-          </div>
-          <div className="flex flex-col gap-2">
-            {recentProjects.map(p => (
-              <div
-                key={p.id}
-                className="group flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3"
-              >
-                <div>
-                  <p className="text-sm text-zinc-200">
-                    {(p.template as any)?.name ?? 'Sin plantilla'}
-                  </p>
-                  <p className="text-xs text-zinc-500 mt-0.5">
-                    {new Date(p.created_at).toLocaleDateString('es-ES', {
-                      day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
-                    })}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <StatusBadge status={p.status} />
-                  <button
-                    onClick={e => handleDeleteVideoProject(e, p.id)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity w-7 h-7 rounded-lg flex items-center justify-center text-zinc-500 hover:text-red-400 hover:bg-zinc-800 cursor-pointer"
-                    title="Eliminar proyecto"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Recent editor projects */}
-      {editorProjects.length > 0 && (
-        <div className="mb-10">
+      {editorProjects.length > 0 ? (
+        <div>
           <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wide mb-3">Ediciones recientes</h2>
           <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
             {editorProjects.map(p => (
@@ -175,7 +99,7 @@ export function DashboardPage({ onNavigate, onNewEditor, onOpenProject }: Dashbo
                 onClick={() => handleOpenEditorProject(p)}
                 className="group flex-none w-32 bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden text-left hover:border-violet-700 transition-all cursor-pointer relative"
               >
-                {/* Action buttons — visible on hover */}
+                {/* Action buttons */}
                 <div
                   className="absolute top-1.5 right-1.5 z-10 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
                   onClick={e => e.stopPropagation()}
@@ -233,15 +157,15 @@ export function DashboardPage({ onNavigate, onNewEditor, onOpenProject }: Dashbo
             ))}
           </div>
         </div>
-      )}
-
-      {!loading && templates.length === 0 && (
+      ) : (
         <div className="bg-zinc-900/50 border border-dashed border-zinc-800 rounded-xl p-8 text-center">
-          <p className="text-zinc-400 text-sm">Empieza creando tu primera plantilla</p>
-          <Button variant="primary" size="sm" className="mt-3" onClick={() => onNavigate('templates')}>
-            <Plus size={14} />
-            Nueva plantilla
-          </Button>
+          <p className="text-zinc-400 text-sm">No hay ediciones todavía</p>
+          <button
+            onClick={onNewEditor}
+            className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-sm rounded-lg transition-colors cursor-pointer"
+          >
+            <Plus size={14} />Nuevo vídeo
+          </button>
         </div>
       )}
     </div>

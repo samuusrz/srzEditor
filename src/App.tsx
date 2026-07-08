@@ -1,15 +1,13 @@
 import { useState, useCallback } from 'react'
 import { Sidebar } from './components/layout/Sidebar'
 import { DashboardPage } from './pages/DashboardPage'
-import { TemplatesPage } from './pages/TemplatesPage'
 import { EditorPage } from './pages/EditorPage'
 import { TextsPage } from './pages/TextsPage'
 import { SongsPage } from './pages/SongsPage'
-import { HistoryPage } from './pages/HistoryPage'
 import { DropEditorPage } from './pages/DropEditorPage'
 import type { EditorState } from './types/editor'
 
-type Page = 'dashboard' | 'templates' | 'editor' | 'texts' | 'songs' | 'history' | 'drops'
+type Page = 'dashboard' | 'editor' | 'texts' | 'songs' | 'drops'
 
 export default function App() {
   const [page, setPage] = useState<Page>('dashboard')
@@ -41,11 +39,9 @@ export default function App() {
   }
 
   const content = {
-    dashboard: <DashboardPage onNavigate={setPage} onNewEditor={newEditor} onOpenProject={openProject} />,
-    templates: <TemplatesPage />,
+    dashboard: <DashboardPage onNewEditor={newEditor} onOpenProject={openProject} />,
     texts: <TextsPage />,
     songs: <SongsPage />,
-    history: <HistoryPage />,
     drops: <DropEditorPage />,
   }[page as Exclude<Page, 'editor'>]
 

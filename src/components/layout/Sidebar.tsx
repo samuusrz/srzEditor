@@ -1,6 +1,6 @@
-import { LayoutTemplate, Film, Type, Music, History, Clapperboard, Zap } from 'lucide-react'
+import { Film, Type, Music, Clapperboard, Zap } from 'lucide-react'
 
-type Page = 'dashboard' | 'templates' | 'editor' | 'texts' | 'songs' | 'history' | 'drops'
+type Page = 'dashboard' | 'editor' | 'texts' | 'songs' | 'drops'
 
 interface SidebarProps {
   current: Page
@@ -9,12 +9,10 @@ interface SidebarProps {
 
 const nav: { id: Page; label: string; icon: React.ReactNode }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: <Clapperboard size={18} /> },
-  { id: 'templates', label: 'Plantillas', icon: <LayoutTemplate size={18} /> },
-  { id: 'editor', label: 'Editar vídeo', icon: <Film size={18} /> },
-  { id: 'texts', label: 'Textos', icon: <Type size={18} /> },
-  { id: 'songs', label: 'Canciones', icon: <Music size={18} /> },
-  { id: 'history', label: 'Historial', icon: <History size={18} /> },
-  { id: 'drops', label: 'Drop Editor', icon: <Zap size={18} /> },
+  { id: 'editor',    label: 'Editar vídeo', icon: <Film size={18} /> },
+  { id: 'texts',     label: 'Textos', icon: <Type size={18} /> },
+  { id: 'songs',     label: 'Canciones', icon: <Music size={18} /> },
+  { id: 'drops',     label: 'Drop Editor', icon: <Zap size={18} /> },
 ]
 
 export function Sidebar({ current, onChange }: SidebarProps) {
