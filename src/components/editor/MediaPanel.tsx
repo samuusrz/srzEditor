@@ -466,8 +466,10 @@ function AudioLibraryPane({ onSetAudio, clips, onPreviewClip }: {
   const [collapsed, setCollapsed]           = useState<Record<string, boolean>>({})
   const [songUsage, setSongUsage]           = useState<Record<string, number>>({})
   const [previewingId, setPreviewingId]     = useState<string | null>(null)
+  const [previewLoadingId, setPreviewLoadingId] = useState<string | null>(null)
   const previewAudioRef = useRef<HTMLAudioElement | null>(null)
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const previewBlobUrl  = useRef<string | null>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -525,37 +527,41 @@ function AudioLibraryPane({ onSetAudio, clips, onPreviewClip }: {
   const stopPreview = () => {
     previewAudioRef.current?.pause()
     if (previewTimerRef.current) clearTimeout(previewTimerRef.current)
+    if (previewBlobUrl.current) { URL.revokeObjectURL(previewBlobUrl.current); previewBlobUrl.current = null }
     setPreviewingId(null)
+    setPreviewLoadingId(null)
   }
 
-  const togglePreview = (song: SongLibraryItem) => {
-    if (previewingId === song.id) { stopPreview(); return }
+  const togglePreview = async (song: SongLibraryItem) => {
+    if (previewingId === song.id || previewLoadingId === song.id) { stopPreview(); return }
     stopPreview()
+    setPreviewLoadingId(song.id)
 
-    const dropAt = getDropPoint(song.id)
-    const ZONE = 1.5
-    const from  = dropAt !== null ? Math.max(0, dropAt - ZONE) : 0
-    const until = dropAt !== null ? dropAt + ZONE : 5
+    try {
+      const url = getPublicUrl(song.storage_path)
+      const blob = await fetch(url).then(r => r.blob())
+      const blobUrl = URL.createObjectURL(blob)
+      previewBlobUrl.current = blobUrl
 
-    const url   = getPublicUrl(song.storage_path)
-    const audio = new Audio(url)
-    audio.preload = 'auto'
-    previewAudioRef.current = audio
-    setPreviewingId(song.id)
+      const dropAt = getDropPoint(song.id)
+      const ZONE  = 1.5
+      const from  = dropAt !== null ? Math.max(0, dropAt - ZONE) : 0
+      const until = dropAt !== null ? dropAt + ZONE : 5
 
-    const start = () => {
-      audio.currentTime = from
-      audio.play().catch(stopPreview)
-      previewTimerRef.current = setTimeout(stopPreview, (until - from) * 1000)
-    }
+      const audio = new Audio(blobUrl)
+      previewAudioRef.current = audio
+      audio.onended = stopPreview
 
-    audio.onended = stopPreview
-    if (from === 0) {
-      // No need to seek, just play immediately once ready
-      audio.addEventListener('canplay', start, { once: true })
-    } else {
-      // Need metadata loaded before we can seek
-      audio.addEventListener('loadedmetadata', start, { once: true })
+      audio.addEventListener('loadedmetadata', () => {
+        audio.currentTime = from
+        audio.play().catch(stopPreview)
+        previewTimerRef.current = setTimeout(stopPreview, (until - from) * 1000)
+      }, { once: true })
+
+      setPreviewLoadingId(null)
+      setPreviewingId(song.id)
+    } catch {
+      stopPreview()
     }
   }
 
@@ -606,33 +612,36 @@ function AudioLibraryPane({ onSetAudio, clips, onPreviewClip }: {
 
   const SongItem = ({ song }: { song: SongLibraryItem }) => {
     const isPreviewing = previewingId === song.id
+    const isLoading    = previewLoadingId === song.id
+    const isActive     = isPreviewing || isLoading
     return (
       <div className="group flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5">
-        {/* Cover */}
         <div className="w-8 h-8 rounded-md overflow-hidden bg-zinc-800 flex items-center justify-center flex-none">
           {covers[song.id]
             ? <img src={covers[song.id]} className="w-full h-full object-cover" alt="" />
             : <Music size={12} className="text-zinc-600" />
           }
         </div>
-        {/* Name — click to use */}
         <button onClick={() => useSong(song)} className="flex-1 text-left cursor-pointer hover:text-white transition-colors min-w-0">
           <p className="text-xs text-zinc-300 truncate">{song.name}</p>
           {song.duration && <p className="text-[10px] text-zinc-500">{song.duration.toFixed(1)}s</p>}
         </button>
-        {/* Preview button */}
         <button
           onClick={e => { e.stopPropagation(); togglePreview(song) }}
           title={isPreviewing ? 'Parar' : 'Escuchar drop'}
           className={`w-6 h-6 rounded-md flex items-center justify-center flex-none cursor-pointer transition-colors ${
-            isPreviewing
+            isActive
               ? 'bg-violet-600 text-white'
               : 'text-zinc-600 hover:text-violet-400 hover:bg-zinc-800 opacity-0 group-hover:opacity-100'
           }`}
         >
-          {isPreviewing ? <Square size={9} className="fill-white" /> : <Play size={9} className="fill-current" />}
+          {isLoading
+            ? <Loader2 size={9} className="animate-spin" />
+            : isPreviewing
+              ? <Square size={9} className="fill-white" />
+              : <Play size={9} className="fill-current" />
+          }
         </button>
-        {/* Delete */}
         <button onClick={() => removeSong(song)} className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 transition-all cursor-pointer flex-none">
           <Trash2 size={10} />
         </button>
