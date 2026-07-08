@@ -168,15 +168,15 @@ async function captureToWebm(
     clipGain.connect(audioDest)
   } catch { /* silent fallback */ }
 
-  // MediaRecorder
+  // MediaRecorder — 60 fps, 25 Mbps (hint; actual bitrate depends on browser)
   const mimeType = pickMimeType()
-  const videoTracks = canvas.captureStream(30).getVideoTracks()
+  const videoTracks = canvas.captureStream(60).getVideoTracks()
   const audioTracks = clipGain ? audioDest.stream.getAudioTracks() : []
   const recStream = new MediaStream([...videoTracks, ...audioTracks])
   const recorder = new MediaRecorder(recStream, {
     mimeType,
-    videoBitsPerSecond: 10_000_000,
-    audioBitsPerSecond: 192_000,
+    videoBitsPerSecond: 25_000_000,
+    audioBitsPerSecond: 320_000,
   })
   const chunks: Blob[] = []
   recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data) }
@@ -330,7 +330,8 @@ async function remuxToMp4(
   const cmd: string[] = ['-i', 'input.webm']
 
   // Common H.264 flags — ultrafast preset for speed, CRF 23 for quality
-  const videoFlags = ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p']
+  // CRF 18 = visualmente sin pérdida. Preset 'slow' = mejor compresión/calidad.
+  const videoFlags = ['-c:v', 'libx264', '-preset', 'slow', '-crf', '18', '-pix_fmt', 'yuv420p']
 
   if (audio) {
     await ffmpeg.writeFile('ext_audio', await fetchFile(audio.file))

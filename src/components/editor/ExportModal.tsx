@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { X, Download, AlertCircle } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { X, Download, AlertCircle, Clock } from 'lucide-react'
 import { renderVideoInBrowser } from '../../lib/renderVideo'
 import type { Clip, TextOverlay, AudioTrack } from '../../types/editor'
 
@@ -12,15 +12,46 @@ interface Props {
 
 type Status = 'idle' | 'rendering' | 'done' | 'error'
 
+function fmtSecs(s: number) {
+  if (s < 60) return `${Math.round(s)}s`
+  const m = Math.floor(s / 60), sec = Math.round(s % 60)
+  return sec > 0 ? `${m}m ${sec}s` : `${m}m`
+}
+
+// Rough estimate: phase1 = realtime clip duration, phase2 = 12× that for slow preset in WASM
+function estimateSeconds(clips: Clip[]) {
+  const dur = clips.reduce((m, c) => Math.max(m, c.startAt + c.duration), 0)
+  return Math.round(dur + dur * 12 + 35) // +35s for FFmpeg load
+}
+
 export function ExportModal({ clips, texts, audio, onClose }: Props) {
-  const [status, setStatus]   = useState<Status>('idle')
+  const [status, setStatus]     = useState<Status>('idle')
   const [progress, setProgress] = useState('')
-  const [pct, setPct]         = useState(0)
-  const [error, setError]     = useState<string | null>(null)
+  const [pct, setPct]           = useState(0)
+  const [error, setError]       = useState<string | null>(null)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
+  const [elapsed, setElapsed]   = useState(0)
+  const [totalTime, setTotalTime] = useState(0)
+  const startRef = useRef<number>(0)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    if (status === 'rendering') {
+      startRef.current = Date.now()
+      timerRef.current = setInterval(() => setElapsed(Math.floor((Date.now() - startRef.current) / 1000)), 1000)
+    } else {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null }
+      if (status === 'done') setTotalTime(Math.floor((Date.now() - startRef.current) / 1000))
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current) }
+  }, [status])
+
+  const estimated = estimateSeconds(clips)
+  const remaining = Math.max(0, estimated - elapsed)
 
   const handleExport = async () => {
     setStatus('rendering')
+    setElapsed(0)
     setError(null)
     setPct(0)
     try {
@@ -61,31 +92,40 @@ export function ExportModal({ clips, texts, audio, onClose }: Props) {
         <div className="p-5 flex flex-col gap-4">
           {/* Info */}
           {status === 'idle' && (
-            <div className="bg-zinc-800/50 rounded-xl p-4 grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <p className="text-xs text-zinc-500 mb-0.5">Clips</p>
-                <p className="text-zinc-200 font-medium">{clips.length}</p>
+            <>
+              <div className="bg-zinc-800/50 rounded-xl p-4 grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-xs text-zinc-500 mb-0.5">Clips</p>
+                  <p className="text-zinc-200 font-medium">{clips.length}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-zinc-500 mb-0.5">Duración</p>
+                  <p className="text-zinc-200 font-medium">
+                    {clips.reduce((m, c) => Math.max(m, c.startAt + c.duration), 0).toFixed(1)}s
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-zinc-500 mb-0.5">Resolución</p>
+                  <p className="text-zinc-200 font-medium">1080×1920 · 60 fps</p>
+                </div>
+                <div>
+                  <p className="text-xs text-zinc-500 mb-0.5">Calidad</p>
+                  <p className="text-zinc-200 font-medium">H.264 CRF 18 · slow</p>
+                </div>
               </div>
-              <div>
-                <p className="text-xs text-zinc-500 mb-0.5">Duración</p>
-                <p className="text-zinc-200 font-medium">
-                  {clips.reduce((m, c) => Math.max(m, c.startAt + c.duration), 0).toFixed(1)}s
+              <div className="flex items-center gap-2 bg-amber-950/40 border border-amber-800/40 rounded-xl px-4 py-3">
+                <Clock size={14} className="text-amber-400 flex-none" />
+                <p className="text-sm text-amber-300">
+                  Tiempo estimado: <span className="font-semibold">~{fmtSecs(estimated)}</span>
+                  <span className="text-amber-600 text-xs ml-1">(varía según el dispositivo)</span>
                 </p>
               </div>
-              <div>
-                <p className="text-xs text-zinc-500 mb-0.5">Resolución</p>
-                <p className="text-zinc-200 font-medium">1080×1920</p>
-              </div>
-              <div>
-                <p className="text-xs text-zinc-500 mb-0.5">Formato</p>
-                <p className="text-zinc-200 font-medium">MP4 H.264</p>
-              </div>
-            </div>
+            </>
           )}
 
           {/* Progress */}
           {status === 'rendering' && (
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-3">
               <div className="flex justify-between text-sm">
                 <span className="text-zinc-300">{progress}</span>
                 <span className="text-zinc-500 tabular-nums">{pct}%</span>
@@ -96,7 +136,13 @@ export function ExportModal({ clips, texts, audio, onClose }: Props) {
                   style={{ width: `${Math.min(100, pct)}%` }}
                 />
               </div>
-              <p className="text-xs text-zinc-600">Puede tardar unos minutos. No cierres la pestaña.</p>
+              <div className="flex items-center justify-between text-xs text-zinc-500">
+                <span>Transcurrido: <span className="text-zinc-400 tabular-nums">{fmtSecs(elapsed)}</span></span>
+                {pct < 98 && (
+                  <span>Restante estimado: <span className="text-zinc-400 tabular-nums">~{fmtSecs(remaining)}</span></span>
+                )}
+              </div>
+              <p className="text-xs text-zinc-600">No cierres la pestaña mientras se exporta.</p>
             </div>
           )}
 
@@ -110,8 +156,11 @@ export function ExportModal({ clips, texts, audio, onClose }: Props) {
 
           {/* Preview */}
           {status === 'done' && videoUrl && (
-            <div className="rounded-xl overflow-hidden bg-black">
-              <video src={videoUrl} controls className="w-full max-h-64 object-contain" />
+            <div className="flex flex-col gap-2">
+              <div className="rounded-xl overflow-hidden bg-black">
+                <video src={videoUrl} controls className="w-full max-h-64 object-contain" />
+              </div>
+              <p className="text-xs text-zinc-600 text-right">Exportado en {fmtSecs(totalTime)}</p>
             </div>
           )}
 
