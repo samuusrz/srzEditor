@@ -293,7 +293,9 @@ async function captureToWebm(
   })
 }
 
-// ── Phase 2: fast remux to MP4 (no video re-encode) ───────────────────────────
+// ── Phase 2: transcode to H.264 MP4 (iPhone/iOS compatible) ──────────────────
+// VP9 (from MediaRecorder WebM) is not supported on iOS — must transcode to H.264.
+// libx264 -preset ultrafast is fast enough: ~30-60s for a 13s clip in WASM.
 
 async function remuxToMp4(
   ffmpeg: FFmpeg,
@@ -301,10 +303,13 @@ async function remuxToMp4(
   audio: AudioTrack | null,
   onProgress: (p: RenderProgress) => void,
 ): Promise<Blob> {
-  onProgress({ step: 'Generando MP4…', pct: 90 })
+  onProgress({ step: 'Codificando H.264…', pct: 90 })
   await ffmpeg.writeFile('input.webm', new Uint8Array(await webm.arrayBuffer()))
 
   const cmd: string[] = ['-i', 'input.webm']
+
+  // Common H.264 flags — ultrafast preset for speed, CRF 23 for quality
+  const videoFlags = ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p']
 
   if (audio) {
     await ffmpeg.writeFile('ext_audio', await fetchFile(audio.file))
@@ -323,10 +328,10 @@ async function remuxToMp4(
       '-filter_complex',
         `[0:a:0]aresample=44100[ca];[1:a:0]${af.join(',')}[ea];[ca][ea]amix=inputs=2:duration=first:normalize=0[aout]`,
       '-map', '0:v:0', '-map', '[aout]',
-      '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
+      ...videoFlags, '-c:a', 'aac', '-b:a', '192k',
     )
   } else {
-    cmd.push('-c', 'copy')
+    cmd.push(...videoFlags, '-c:a', 'aac', '-b:a', '192k')
   }
 
   cmd.push('-movflags', '+faststart', 'output.mp4')
@@ -335,7 +340,7 @@ async function remuxToMp4(
   const handler = ({ progress }: { progress: number }) => {
     const p = Math.min(1, Math.max(0, progress))
     lastPct = 90 + Math.round(p * 8)
-    onProgress({ step: 'Generando MP4…', pct: lastPct })
+    onProgress({ step: 'Codificando H.264…', pct: lastPct })
     if (p >= 0.98) ffmpeg.off('progress', handler)
   }
   ffmpeg.on('progress', handler)
