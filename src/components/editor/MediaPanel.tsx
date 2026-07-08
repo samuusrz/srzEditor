@@ -9,6 +9,10 @@ import type { SongLibraryItem, TextLibraryItem } from '../../types'
 import { getDropPoint } from '../../lib/dropStorage'
 import { getAllSongCovers } from '../../lib/songCovers'
 import { getSongFolders, type SongFolder } from '../../lib/songFolders'
+import { getUsageTimes, recordUsage } from '../../lib/usageTracker'
+
+const SONG_USAGE_KEY = 'srz-song-usage'
+const TEXT_USAGE_KEY = 'srz-text-usage'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -241,6 +245,7 @@ function TextLibraryPane({ texts, totalDuration, onAddText, onRemoveText }: {
   const [saving, setSaving]       = useState(false)
   const [pendingId, setPendingId] = useState<string | null>(null)
   const [moleName, setMoleName]   = useState('')
+  const [textUsage, setTextUsage] = useState<Record<string, number>>(() => getUsageTimes(TEXT_USAGE_KEY))
 
   const loadTemplates = () => {
     setLoading(true)
@@ -285,6 +290,8 @@ function TextLibraryPane({ texts, totalDuration, onAddText, onRemoveText }: {
   }
 
   const useTemplate = (tmpl: TextTemplate) => {
+    recordUsage(TEXT_USAGE_KEY, tmpl.id)
+    setTextUsage(getUsageTimes(TEXT_USAGE_KEY))
     onAddText({
       id: crypto.randomUUID(),
       content: tmpl.content,
@@ -297,6 +304,8 @@ function TextLibraryPane({ texts, totalDuration, onAddText, onRemoveText }: {
       track: 0,
     })
   }
+
+  const sortedTemplates = [...templates].sort((a, b) => (textUsage[b.id] ?? 0) - (textUsage[a.id] ?? 0))
 
   const removeTemplate = async (tmpl: TextTemplate) => {
     await deleteTextItem(tmpl.id).catch(console.error)
@@ -365,7 +374,7 @@ function TextLibraryPane({ texts, totalDuration, onAddText, onRemoveText }: {
       {templates.length > 0 && (
         <div className="flex flex-col gap-1 mt-1">
           <p className="text-[10px] text-zinc-600 uppercase tracking-wider px-1">Moldes guardados</p>
-          {templates.map(tmpl => (
+          {sortedTemplates.map(tmpl => (
             <div key={tmpl.id} className="group flex items-center gap-2 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-lg px-2 py-2 transition-colors">
               {/* Color swatch */}
               <div className="w-5 h-5 rounded flex-none flex items-center justify-center" style={{ background: tmpl.color + '22', border: `1.5px solid ${tmpl.color}44` }}>
@@ -455,12 +464,14 @@ function AudioLibraryPane({ onSetAudio, clips, onPreviewClip }: {
   const [covers, setCovers]                 = useState<Record<string, string>>({})
   const [folders, setFolders]               = useState<SongFolder[]>([])
   const [collapsed, setCollapsed]           = useState<Record<string, boolean>>({})
+  const [songUsage, setSongUsage]           = useState<Record<string, number>>({})
 
   useEffect(() => {
     setLoading(true)
     getSongLibrary().then(setSongs).catch(console.error).finally(() => setLoading(false))
     setCovers(getAllSongCovers())
     setFolders(getSongFolders())
+    setSongUsage(getUsageTimes(SONG_USAGE_KEY))
   }, [])
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -493,6 +504,8 @@ function AudioLibraryPane({ onSetAudio, clips, onPreviewClip }: {
       const { file, duration, localUrl } = await fetchAudioFile(url, song.name)
       const finalDuration = song.duration ?? duration
       const dropAt = getDropPoint(song.id)
+      recordUsage(SONG_USAGE_KEY, song.id)
+      setSongUsage(getUsageTimes(SONG_USAGE_KEY))
       if (dropAt !== null && clips.length > 0) {
         setSelectedClip(null)
         setPendingDropSong({ song, dropAt, url, file, duration: finalDuration, localUrl })
@@ -540,9 +553,16 @@ function AudioLibraryPane({ onSetAudio, clips, onPreviewClip }: {
 
   const sortedClips = [...clips].sort((a, b) => a.startAt - b.startAt)
 
+  // Sort songs by most recently used, then by created_at (newest first for unused)
+  const sortedSongs = [...songs].sort((a, b) => {
+    const ua = songUsage[a.id] ?? 0
+    const ub = songUsage[b.id] ?? 0
+    return ub - ua
+  })
+
   // Group songs by folder
   const assignedIds = new Set(folders.flatMap(f => f.songIds))
-  const unassigned  = songs.filter(s => !assignedIds.has(s.id))
+  const unassigned  = sortedSongs.filter(s => !assignedIds.has(s.id))
 
   const SongItem = ({ song }: { song: SongLibraryItem }) => (
     <div className="group flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5">
@@ -590,7 +610,7 @@ function AudioLibraryPane({ onSetAudio, clips, onPreviewClip }: {
 
       {/* Folders */}
       {folders.map(folder => {
-        const folderSongs = songs.filter(s => folder.songIds.includes(s.id))
+        const folderSongs = sortedSongs.filter(s => folder.songIds.includes(s.id))
         if (folderSongs.length === 0) return null
         const isCollapsed = collapsed[folder.id]
         return (
