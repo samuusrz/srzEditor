@@ -203,9 +203,10 @@ interface History {
   past: EditorState[]
   present: EditorState
   future: EditorState[]
+  preDrag: EditorState | null  // state saved at drag start, committed on SNAPSHOT
 }
 
-type HistoryAction = Action | { type: 'UNDO' } | { type: 'REDO' } | { type: 'SNAPSHOT' }
+type HistoryAction = Action | { type: 'UNDO' } | { type: 'REDO' } | { type: 'SNAPSHOT' } | { type: 'PRE_DRAG' }
 
 const MAX_HISTORY = 60
 
@@ -236,15 +237,22 @@ function historyReducer(hist: History, action: HistoryAction): History {
     }
   }
 
-  // Snapshot: save current state to undo history without modifying it
-  // (called on mouseUp after a drag)
+  // PRE_DRAG: capture the pre-drag state so SNAPSHOT can commit it as the undo point
+  if (action.type === 'PRE_DRAG') {
+    return { ...hist, preDrag: hist.present }
+  }
+
+  // SNAPSHOT: commit the pre-drag state (or current if no preDrag) to undo history
+  // Called on mouseUp after a drag — saves state *before* drag, not after
   if (action.type === 'SNAPSHOT') {
+    const stateToSave = hist.preDrag ?? hist.present
     const last = hist.past[hist.past.length - 1]
-    if (last === hist.present) return hist  // nothing changed since last snapshot
+    if (last === stateToSave) return { ...hist, preDrag: null }
     return {
-      past: [...hist.past.slice(-(MAX_HISTORY - 1)), hist.present],
+      past: [...hist.past.slice(-(MAX_HISTORY - 1)), stateToSave],
       present: hist.present,
       future: [],
+      preDrag: null,
     }
   }
 
@@ -265,7 +273,7 @@ export function useEditor(initialState?: EditorState) {
   const [hist, dispatch] = useReducer(
     historyReducer,
     initialState,
-    (init): History => ({ past: [], present: init ?? editorInit, future: [] }),
+    (init): History => ({ past: [], present: init ?? editorInit, future: [], preDrag: null }),
   )
   const state = hist.present
   const totalDuration = state.clips.reduce((m, c) => Math.max(m, c.startAt + c.duration), 0)
@@ -278,6 +286,7 @@ export function useEditor(initialState?: EditorState) {
     undo:           useCallback(() => dispatch({ type: 'UNDO' }), []),
     redo:           useCallback(() => dispatch({ type: 'REDO' }), []),
     snapshot:       useCallback(() => dispatch({ type: 'SNAPSHOT' }), []),
+    preDrag:        useCallback(() => dispatch({ type: 'PRE_DRAG' }), []),
     addClip:               useCallback((clip: Clip) => dispatch({ type: 'ADD_CLIP', clip }), []),
     removeClip:            useCallback((id: string) => dispatch({ type: 'REMOVE_CLIP', id }), []),
     resolveClipConflicts:  useCallback((winnerId: string) => dispatch({ type: 'RESOLVE_CONFLICTS', winnerId }), []),

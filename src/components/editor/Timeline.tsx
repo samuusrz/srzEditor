@@ -57,6 +57,7 @@ interface Props {
   onSelect: (item: SelectedItem) => void
   onSetZoom: (z: number) => void
   onSnapshot: () => void
+  onPreDrag: () => void
   onPreviewClip: (clip: Clip) => void
 }
 
@@ -65,7 +66,7 @@ export function Timeline({
   onSetPlayhead, onMoveClip, onTrimClip, onSplitClip, onResolveConflicts, onToggleMute,
   onExtractAudio, onMoveText, onTrimText, onResolveTextConflicts,
   onMoveAudio, onDragAudioPos, onDragAudioKf, onTrimAudio,
-  onMoveMulti, onSelect, onSetZoom, onSnapshot, onPreviewClip,
+  onMoveMulti, onSelect, onSetZoom, onSnapshot, onPreDrag, onPreviewClip,
 }: Props) {
   const [snapLine, setSnapLine] = useState<number | null>(null)
   const [band, setBand] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
@@ -159,6 +160,7 @@ export function Timeline({
   const startClipDrag = (e: React.MouseEvent, clip: Clip) => {
     e.stopPropagation()
     const ctrlKey = e.ctrlKey || e.metaKey
+    if (!ctrlKey) onPreDrag()
 
     if (ctrlKey) {
       if (selected?.type === 'multi') {
@@ -230,24 +232,65 @@ export function Timeline({
 
   // ── Clip trim ─────────────────────────────────────────────────────────────
   const startTrimDrag = (e: React.MouseEvent, clip: Clip, side: 'left' | 'right') => {
+    e.stopPropagation()
+    onPreDrag()
     const startX = e.clientX
     const { startAt, trimStart, duration, originalDuration } = clip
-    makeDrag(ev => {
+    const track = clip.track ?? 0
+    const sameTrack = clips.filter(c => c.id !== clip.id && (c.track ?? 0) === track)
+    const snapThresh = 8 / zoom
+
+    const onMove = (ev: MouseEvent) => {
       const delta = (ev.clientX - startX) / zoom
+
       if (side === 'right') {
-        onTrimClip(clip.id, trimStart, Math.max(0.1, Math.min(originalDuration - trimStart, duration + delta)), startAt)
+        let newDur = Math.max(0.1, Math.min(originalDuration - trimStart, duration + delta))
+        // Snap right edge to left edge of nearest right neighbor, and hard-clamp so no overlap
+        const rightNeighbors = sameTrack.filter(n => n.startAt >= startAt + duration - 0.01)
+        let snapTarget: number | null = null
+        if (rightNeighbors.length > 0) {
+          const closestRight = Math.min(...rightNeighbors.map(n => n.startAt))
+          const rightEdge = startAt + newDur
+          if (Math.abs(closestRight - rightEdge) < snapThresh) { snapTarget = closestRight }
+          newDur = Math.min(newDur, closestRight - startAt)
+        }
+        setSnapLine(snapTarget)
+        onTrimClip(clip.id, trimStart, Math.max(0.1, newDur), startAt)
       } else {
-        const newTrim = Math.max(0, Math.min(trimStart + duration - 0.1, trimStart + delta))
-        const diff = newTrim - trimStart
-        onTrimClip(clip.id, newTrim, duration - diff, startAt + diff)
+        let newStartAt = Math.max(0, startAt + delta)
+        const maxShift = duration - 0.1
+        newStartAt = Math.min(startAt + maxShift, newStartAt)
+        // Snap left edge to right edge of nearest left neighbor, and hard-clamp so no overlap
+        const leftNeighbors = sameTrack.filter(n => n.startAt + n.duration <= startAt + 0.01)
+        let snapTarget: number | null = null
+        if (leftNeighbors.length > 0) {
+          const closestLeftEnd = Math.max(...leftNeighbors.map(n => n.startAt + n.duration))
+          if (Math.abs(closestLeftEnd - newStartAt) < snapThresh) { snapTarget = closestLeftEnd }
+          newStartAt = Math.max(newStartAt, closestLeftEnd)
+        }
+        setSnapLine(snapTarget)
+        const diff = newStartAt - startAt
+        const newTrim = Math.max(0, Math.min(trimStart + duration - 0.1, trimStart + diff))
+        const actualDiff = newTrim - trimStart
+        onTrimClip(clip.id, newTrim, duration - actualDiff, startAt + actualDiff)
       }
-    }, () => onSnapshot())(e)
+    }
+
+    const onUp = () => {
+      setSnapLine(null)
+      onSnapshot()
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
   }
 
   // ── Text body drag ────────────────────────────────────────────────────────
   const startTextDrag = (e: React.MouseEvent, text: TextOverlay) => {
     e.stopPropagation()
     const ctrlKey = e.ctrlKey || e.metaKey
+    if (!ctrlKey) onPreDrag()
 
     if (ctrlKey) {
       if (selected?.type === 'multi') {
@@ -318,6 +361,7 @@ export function Timeline({
 
   // ── Text trim ─────────────────────────────────────────────────────────────
   const startTextTrim = (e: React.MouseEvent, text: TextOverlay, side: 'left' | 'right') => {
+    onPreDrag()
     const startX = e.clientX
     const { startAt, duration } = text
     makeDrag(ev => {
@@ -335,6 +379,7 @@ export function Timeline({
   const startAudioDrag = (e: React.MouseEvent) => {
     if (!audio) return
     e.stopPropagation()
+    onPreDrag()
     onSelect({ type: 'audio' })
     const startX = e.clientX; const orig = audio.startAt; const dur = audio.duration
 
@@ -352,6 +397,7 @@ export function Timeline({
   // ── Audio trim ────────────────────────────────────────────────────────────
   const startAudioTrim = (e: React.MouseEvent, side: 'left' | 'right') => {
     if (!audio) return
+    onPreDrag()
     const startX = e.clientX
     const { startAt, duration, originalDuration } = audio
     makeDrag(ev => {
@@ -369,6 +415,7 @@ export function Timeline({
   const startKfDrag = (e: React.MouseEvent, idx: number) => {
     e.stopPropagation()
     if (!audio) return
+    onPreDrag()
     const startY = e.clientY; const origVol = audio.keyframes[idx].volume
     makeDrag(ev => {
       const newVol = Math.max(0, Math.min(1, origVol - (ev.clientY - startY) / TRACK_H * 1.5))

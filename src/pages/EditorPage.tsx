@@ -30,7 +30,7 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
 
   const {
     state, totalDuration,
-    canUndo, canRedo, undo, redo, snapshot,
+    canUndo, canRedo, undo, redo, snapshot, preDrag,
     addClip, removeClip, resolveClipConflicts, moveClip, trimClip, splitClip,
     setClipVolume, toggleClipMute, extractAudio,
     addText, updateText, dragTextPos, removeText, splitText, moveText, trimText, resolveTextConflicts, moveMulti, removeMulti,
@@ -246,7 +246,7 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
         onMoveAudio={updateAudio}
         onDragAudioPos={dragAudioPos} onDragAudioKf={dragAudioKf} onTrimAudio={trimAudio}
         onMoveMulti={moveMulti}
-        onSelect={select} onSetZoom={setZoom} onSnapshot={snapshot}
+        onSelect={select} onSetZoom={setZoom} onSnapshot={snapshot} onPreDrag={preDrag}
         onPreviewClip={handlePreviewClip}
       />
 
