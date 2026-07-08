@@ -3,6 +3,11 @@ import * as path from 'path'
 import * as fs from 'fs'
 import * as os from 'os'
 import { spawn } from 'child_process'
+import { fileURLToPath } from 'url'
+
+// ESM equivalent of __dirname
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 function getFfmpegPath(): string {
   const p = require('ffmpeg-static') as string
@@ -16,7 +21,7 @@ function createWindow() {
     backgroundColor: '#09090b',
     autoHideMenuBar: true,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, 'preload.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
     },
