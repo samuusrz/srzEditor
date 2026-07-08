@@ -39,6 +39,7 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
   } = useEditor(initialEditorState)
 
   const [previewUntil, setPreviewUntil] = useState<number | null>(null)
+  const [previewHeight, setPreviewHeight] = useState(0)
 
   const handlePreviewClip = useCallback((clip: Clip) => {
     setPlayhead(clip.startAt)
@@ -222,6 +223,7 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
           onSetPlayhead={setPlayhead} onSetPlaying={setPlaying}
           onUpdateText={updateText} onDragTextPos={dragTextPos}
           onSelect={select} onSnapshot={snapshot} onClearPreview={handleClearPreview}
+          onPreviewHeight={setPreviewHeight}
         />
         <PropertiesPanel
           selected={selected} clips={clips} texts={texts} audio={audio} totalDuration={totalDuration}
@@ -248,7 +250,7 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
       />
 
       {showExport && (
-        <ExportModal clips={clips} texts={texts} audio={audio} onClose={() => setShowExport(false)} />
+        <ExportModal clips={clips} texts={texts} audio={audio} previewHeight={previewHeight} onClose={() => setShowExport(false)} />
       )}
     </div>
   )

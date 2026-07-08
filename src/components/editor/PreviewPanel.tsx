@@ -20,6 +20,7 @@ interface Props {
   onSelect: (item: SelectedItem) => void
   onSnapshot: () => void
   onClearPreview: () => void
+  onPreviewHeight: (h: number) => void
 }
 
 function fmt(t: number) {
@@ -40,6 +41,7 @@ const SNAP = 2.5  // % threshold to trigger snap
 export function PreviewPanel({
   clips, texts, audio, playhead, playing, totalDuration, selected, previewUntil,
   onSetPlayhead, onSetPlaying, onUpdateText, onDragTextPos, onSelect, onSnapshot, onClearPreview,
+  onPreviewHeight,
 }: Props) {
   const videoRef        = useRef<HTMLVideoElement>(null)
   const audioRef        = useRef<HTMLAudioElement>(null)
@@ -157,6 +159,18 @@ export function PreviewPanel({
     rafRef.current = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(rafRef.current)
   }, [playing, totalDuration])
+
+  // ── Report preview height for export font scaling ──────────────────────
+  useEffect(() => {
+    const el = previewRef.current
+    if (!el) return
+    const ro = new ResizeObserver(entries => {
+      const h = entries[0]?.contentRect.height
+      if (h > 0) onPreviewHeight(h)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [onPreviewHeight])
 
   // ── Text drag with snap guides ──────────────────────────────────────────
   const startTextDrag = useCallback((e: React.MouseEvent, text: TextOverlay) => {

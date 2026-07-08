@@ -5,6 +5,9 @@ import { tokenizeSegments, loadAppleEmoji } from './appleEmoji'
 
 export type RenderProgress = { step: string; pct: number }
 
+const CANVAS_H = 1920
+const CANVAS_W = 1080
+
 // ── Utils ──────────────────────────────────────────────────────────────────────
 
 function pickMimeType(): string {
@@ -24,44 +27,48 @@ async function buildFFmpeg(): Promise<FFmpeg> {
   return ffmpeg
 }
 
-// ── Sync text draw (called inside RAF loop — no awaits) ───────────────────────
+// ── Text drawing (sync, called inside RAF loop) ────────────────────────────────
 
 type Seg = { type: 'text' | 'emoji'; content: string; w: number }
-type ParsedText = { text: TextOverlay; lines: Seg[][] }
+type ParsedText = { text: TextOverlay; lines: Seg[][]; scaledFontSize: number }
 
-/** Pre-parse all text overlays into segments + widths (needs a canvas ctx for measureText) */
-function parseTexts(texts: TextOverlay[], ctx: CanvasRenderingContext2D): ParsedText[] {
+/**
+ * Pre-parse text overlays. Measures widths on the recording canvas ctx,
+ * scaling fontSize from preview pixels → canvas pixels.
+ */
+function parseTexts(
+  texts: TextOverlay[],
+  ctx: CanvasRenderingContext2D,
+  fontScale: number, // CANVAS_H / previewHeight
+): ParsedText[] {
   return texts
     .filter(t => t.content.trim())
     .map(t => {
-      ctx.font = `${t.bold ? 'bold ' : ''}${t.fontSize}px Arial, sans-serif`
+      const scaledFontSize = Math.round(t.fontSize * fontScale)
+      ctx.font = `${t.bold ? 'bold ' : ''}${scaledFontSize}px Arial, sans-serif`
       const lines = t.content.split('\n').map(line => {
         const segs: Seg[] = []
         for (const seg of tokenizeSegments(line)) {
           const w = seg.type === 'emoji'
-            ? t.fontSize * 1.15
+            ? scaledFontSize * 1.15
             : ctx.measureText(seg.content).width
           segs.push({ type: seg.type, content: seg.content, w })
         }
         return segs
       })
-      return { text: t, lines }
+      return { text: t, lines, scaledFontSize }
     })
 }
 
-/** Draw one text overlay onto ctx synchronously using pre-loaded emojiCache */
 function drawTextOverlay(
   ctx: CanvasRenderingContext2D,
   parsed: ParsedText,
   emojiCache: Map<string, HTMLImageElement>,
-  W: number,
-  H: number,
 ) {
-  const { text: t, lines } = parsed
-  const { fontSize, bold, color } = t
-  const x = (t.x / 100) * W
-  const y = (t.y / 100) * H
-  const lineHeight = fontSize * 1.3
+  const { text: t, lines, scaledFontSize } = parsed
+  const x = (t.x / 100) * CANVAS_W
+  const y = (t.y / 100) * CANVAS_H
+  const lineHeight = scaledFontSize * 1.3
   const totalH = lines.length * lineHeight
 
   for (let li = 0; li < lines.length; li++) {
@@ -73,23 +80,23 @@ function drawTextOverlay(
     for (const seg of segs) {
       if (seg.type === 'text') {
         if (!seg.content) { cx += seg.w; continue }
-        ctx.font        = `${bold ? 'bold ' : ''}${fontSize}px Arial, sans-serif`
+        ctx.font        = `${t.bold ? 'bold ' : ''}${scaledFontSize}px Arial, sans-serif`
         ctx.strokeStyle = '#000000'
-        ctx.lineWidth   = Math.max(2, fontSize * 0.18)
+        ctx.lineWidth   = Math.max(2, scaledFontSize * 0.18)
         ctx.lineJoin    = 'round'
         ctx.miterLimit  = 2
         ctx.strokeText(seg.content, cx, cy)
-        ctx.fillStyle   = color
+        ctx.fillStyle   = t.color
         ctx.fillText(seg.content, cx, cy)
       } else {
-        const emojiSize = fontSize * 1.15
+        const emojiSize = scaledFontSize * 1.15
         const ey = cy - emojiSize * 0.82
         const img = emojiCache.get(seg.content)
         if (img) {
           ctx.drawImage(img, cx, ey, emojiSize, emojiSize)
         } else {
-          ctx.font      = `${fontSize}px Arial, sans-serif`
-          ctx.fillStyle = color
+          ctx.font      = `${scaledFontSize}px Arial, sans-serif`
+          ctx.fillStyle = t.color
           ctx.fillText(seg.content, cx, cy)
         }
       }
@@ -103,19 +110,22 @@ function drawTextOverlay(
 async function captureToWebm(
   clips: Clip[],
   texts: TextOverlay[],
+  fontScale: number,
   onProgress: (p: RenderProgress) => void,
 ): Promise<Blob> {
-  const W = 1080, H = 1920
-  const totalDur = clips.reduce((s, c) => s + c.duration, 0)
+  // Sort clips by their position on the timeline
+  const sortedClips = [...clips].sort((a, b) => a.startAt - b.startAt)
+  // Total duration = end of last clip
+  const totalDur = sortedClips.reduce((max, c) => Math.max(max, c.startAt + c.duration), 0)
 
-  // Canvas (used for measuring AND recording)
+  // Canvas
   const canvas = document.createElement('canvas')
-  canvas.width = W; canvas.height = H
+  canvas.width = CANVAS_W; canvas.height = CANVAS_H
   const ctx = canvas.getContext('2d', { alpha: false })!
-  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H)
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, CANVAS_W, CANVAS_H)
 
   // Pre-parse text overlays (synchronous — just measures text widths)
-  const parsedTexts = parseTexts(texts, ctx)
+  const parsedTexts = parseTexts(texts, ctx, fontScale)
 
   // Collect all unique emoji across all text overlays
   onProgress({ step: 'Preparando…', pct: 3 })
@@ -127,22 +137,19 @@ async function captureToWebm(
       }
     }
   }
-
-  // Pre-load all emoji in parallel (4s timeout each via loadAppleEmoji)
   const emojiCache = new Map<string, HTMLImageElement>()
   if (allEmoji.size > 0) {
     await Promise.all([...allEmoji].map(e =>
       loadAppleEmoji(e)
         .then(img => emojiCache.set(e, img))
-        .catch(() => { /* fallback: draw as text */ })
+        .catch(() => {})
     ))
   }
 
   onProgress({ step: 'Iniciando grabación…', pct: 5 })
 
-  // Web Audio API: route video element audio into the MediaRecorder stream
+  // Web Audio API
   const audioCtx  = new AudioContext({ sampleRate: 44100 })
-  // Resume in case AudioContext is suspended after async emoji loading
   if (audioCtx.state === 'suspended') await audioCtx.resume().catch(() => {})
   const audioDest = audioCtx.createMediaStreamDestination()
 
@@ -158,9 +165,7 @@ async function captureToWebm(
     clipGain = audioCtx.createGain()
     vidSrc.connect(clipGain)
     clipGain.connect(audioDest)
-  } catch {
-    // Audio routing failed — record video only (silent)
-  }
+  } catch { /* silent fallback */ }
 
   // MediaRecorder
   const mimeType = pickMimeType()
@@ -176,10 +181,44 @@ async function captureToWebm(
   recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data) }
   recorder.start(100)
 
-  // Record each clip sequentially
-  let timeline = 0
-  for (let ci = 0; ci < clips.length; ci++) {
-    const clip = clips[ci]
+  // Helper: draw text overlays for a given timeline position
+  const drawTexts = (timelinePos: number) => {
+    for (const parsed of parsedTexts) {
+      const t = parsed.text
+      if (timelinePos >= t.startAt && timelinePos < t.startAt + t.duration) {
+        drawTextOverlay(ctx, parsed, emojiCache)
+      }
+    }
+  }
+
+  // Helper: record black frames for a gap on the timeline
+  const recordGap = (gapStart: number, gapDur: number) =>
+    new Promise<void>(resolve => {
+      const wallStart = performance.now()
+      const frame = () => {
+        const elapsed = (performance.now() - wallStart) / 1000
+        if (elapsed >= gapDur) { resolve(); return }
+        ctx.fillStyle = '#000'; ctx.fillRect(0, 0, CANVAS_W, CANVAS_H)
+        drawTexts(gapStart + elapsed)
+        requestAnimationFrame(frame)
+      }
+      requestAnimationFrame(frame)
+    })
+
+  // Record each clip in timeline order, inserting black frames for gaps
+  let timelinePos = 0
+
+  for (let ci = 0; ci < sortedClips.length; ci++) {
+    const clip = sortedClips[ci]
+
+    // Gap before this clip
+    const gapDur = clip.startAt - timelinePos
+    if (gapDur > 0.02) {
+      await recordGap(timelinePos, gapDur)
+      timelinePos = clip.startAt
+    }
+
+    // Set clip volume
     if (clipGain) clipGain.gain.value = clip.muted ? 0 : clip.volume
 
     // Load & seek — wait for loadedmetadata before seeking
@@ -191,18 +230,12 @@ async function captureToWebm(
         clearTimeout(safetyTimer)
         fn()
       }
-      // Safety net: never hang more than 15s per clip
       const safetyTimer = setTimeout(() => settle(res), 15_000)
-
       vidEl.onerror = () => settle(() => rej(new Error(`Error al cargar: ${clip.name}`)))
 
       const doSeek = () => {
-        if (clip.trimStart <= 0) {
-          settle(res)
-        } else {
-          vidEl.onseeked = () => settle(res)
-          vidEl.currentTime = clip.trimStart
-        }
+        if (clip.trimStart <= 0) { settle(res) }
+        else { vidEl.onseeked = () => settle(res); vidEl.currentTime = clip.trimStart }
       }
 
       if (vidEl.src !== clip.localUrl) {
@@ -217,38 +250,29 @@ async function captureToWebm(
     })
 
     // Capture frames for clip.duration seconds
-    await new Promise<void>((resolve) => {
+    await new Promise<void>(resolve => {
       const wallStart = performance.now()
-
       const frame = () => {
         const elapsed = (performance.now() - wallStart) / 1000
         if (elapsed >= clip.duration) {
           vidEl.pause()
-          timeline += clip.duration
+          timelinePos = clip.startAt + clip.duration
           onProgress({
-            step: `Grabando clip ${ci + 1}/${clips.length}…`,
-            pct: 8 + Math.round((timeline / totalDur) * 74),
+            step: `Grabando clip ${ci + 1}/${sortedClips.length}…`,
+            pct: 8 + Math.round((timelinePos / totalDur) * 74),
           })
           resolve(); return
         }
 
         // Draw video frame with letterbox
         if (vidEl.readyState >= 2 && vidEl.videoWidth) {
-          const s  = Math.min(W / vidEl.videoWidth, H / vidEl.videoHeight)
+          const s  = Math.min(CANVAS_W / vidEl.videoWidth, CANVAS_H / vidEl.videoHeight)
           const sw = vidEl.videoWidth * s, sh = vidEl.videoHeight * s
-          ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H)
-          ctx.drawImage(vidEl, (W - sw) / 2, (H - sh) / 2, sw, sh)
+          ctx.fillStyle = '#000'; ctx.fillRect(0, 0, CANVAS_W, CANVAS_H)
+          ctx.drawImage(vidEl, (CANVAS_W - sw) / 2, (CANVAS_H - sh) / 2, sw, sh)
         }
 
-        // Draw active text overlays synchronously
-        const now = timeline + elapsed
-        for (const parsed of parsedTexts) {
-          const t = parsed.text
-          if (now >= t.startAt && now < t.startAt + t.duration) {
-            drawTextOverlay(ctx, parsed, emojiCache, W, H)
-          }
-        }
-
+        drawTexts(clip.startAt + elapsed)
         requestAnimationFrame(frame)
       }
 
@@ -262,7 +286,7 @@ async function captureToWebm(
   await audioCtx.close()
 
   onProgress({ step: 'Guardando grabación…', pct: 84 })
-  return new Promise<Blob>((resolve) => {
+  return new Promise<Blob>(resolve => {
     recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }))
     recorder.stop()
   })
@@ -323,15 +347,19 @@ async function remuxToMp4(
   return new Blob([data as unknown as ArrayBuffer], { type: 'video/mp4' })
 }
 
-// ── Main export function ───────────────────────────────────────────────────────
+// ── Main export ────────────────────────────────────────────────────────────────
 
 export async function renderVideoInBrowser(
   clips:  Clip[],
   texts:  TextOverlay[],
   audio:  AudioTrack | null,
+  previewHeight: number,
   onProgress: (p: RenderProgress) => void,
 ): Promise<Blob> {
-  const webm = await captureToWebm(clips, texts, onProgress)
+  // Scale font sizes from preview CSS pixels → canvas pixels
+  const fontScale = previewHeight > 0 ? CANVAS_H / previewHeight : 1
+
+  const webm = await captureToWebm(clips, texts, fontScale, onProgress)
 
   onProgress({ step: 'Cargando FFmpeg…', pct: 87 })
   const ffmpeg = await buildFFmpeg()
