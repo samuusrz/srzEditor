@@ -96,9 +96,9 @@ function WaveformEditor({ song, initialDrop, onSave }: {
   initialDrop: number | null
   onSave: (dropAt: number) => void
 }) {
-  const canvasRef  = useRef<HTMLCanvasElement>(null)
-  const audioRef   = useRef<HTMLAudioElement>(null)
-  const peaksRef   = useRef<Float32Array | null>(null)
+  const canvasRef   = useRef<HTMLCanvasElement>(null)
+  const audioRef    = useRef<HTMLAudioElement>(null)
+  const peaksRef    = useRef<Float32Array | null>(null)
   const durationRef = useRef(song.duration ?? 0)
 
   const [playing,     setPlaying]     = useState(false)
@@ -106,22 +106,34 @@ function WaveformEditor({ song, initialDrop, onSave }: {
   const [duration,    setDuration]    = useState(song.duration ?? 0)
   const [dropAt,      setDropAt]      = useState<number>(initialDrop ?? 0)
   const [loadingWav,  setLoadingWav]  = useState(true)
+  const [audioUrl,    setAudioUrl]    = useState<string | null>(null)
   const [saved,       setSaved]       = useState(false)
 
   const rafRef = useRef(0)
-  const url = getPublicUrl(song.storage_path)
+  const remoteUrl = getPublicUrl(song.storage_path)
 
-  // ── Decode audio for waveform ──────────────────────────────────────────────
+  // ── Fetch once → blob URL (audio element) + decode (waveform) ─────────────
   useEffect(() => {
     let cancelled = false
+    let blobUrl: string | null = null
     setLoadingWav(true)
+    setAudioUrl(null)
     const W = 900
 
-    fetch(url)
-      .then(r => r.arrayBuffer())
-      .then(buf => new AudioContext().decodeAudioData(buf))
+    fetch(remoteUrl)
+      .then(r => r.blob())
+      .then(blob => {
+        if (cancelled) return null
+        blobUrl = URL.createObjectURL(blob)
+        setAudioUrl(blobUrl)
+        return blob.arrayBuffer()
+      })
+      .then(buf => {
+        if (!buf || cancelled) return
+        return new AudioContext().decodeAudioData(buf)
+      })
       .then(decoded => {
-        if (cancelled) return
+        if (!decoded || cancelled) return
         const data = decoded.getChannelData(0)
         const blockSize = Math.max(1, Math.floor(data.length / W))
         const p = new Float32Array(W)
@@ -140,8 +152,11 @@ function WaveformEditor({ song, initialDrop, onSave }: {
       })
       .catch(() => setLoadingWav(false))
 
-    return () => { cancelled = true }
-  }, [url])
+    return () => {
+      cancelled = true
+      if (blobUrl) URL.revokeObjectURL(blobUrl)
+    }
+  }, [remoteUrl])
 
   // ── Draw waveform ──────────────────────────────────────────────────────────
   const draw = useCallback(() => {
@@ -225,11 +240,18 @@ function WaveformEditor({ song, initialDrop, onSave }: {
     document.addEventListener('mouseup', onUp)
   }
 
-  const togglePlay = () => {
+  const togglePlay = async () => {
     const aud = audioRef.current
     if (!aud) return
-    if (playing) { aud.pause(); setPlaying(false) }
-    else { aud.play().catch(() => {}); setPlaying(true) }
+    if (playing) {
+      aud.pause()
+      setPlaying(false)
+    } else {
+      try {
+        await aud.play()
+        setPlaying(true)
+      } catch { /* autoplay denied or not loaded yet */ }
+    }
   }
 
   const handleSave = () => {
@@ -310,17 +332,19 @@ function WaveformEditor({ song, initialDrop, onSave }: {
         </div>
       </div>
 
-      <audio
-        ref={audioRef}
-        src={url}
-        preload="auto"
-        onEnded={() => setPlaying(false)}
-        onLoadedMetadata={e => {
-          const d = (e.target as HTMLAudioElement).duration
-          durationRef.current = d
-          setDuration(d)
-        }}
-      />
+      {audioUrl && (
+        <audio
+          ref={audioRef}
+          src={audioUrl}
+          preload="auto"
+          onEnded={() => setPlaying(false)}
+          onLoadedMetadata={e => {
+            const d = (e.target as HTMLAudioElement).duration
+            durationRef.current = d
+            setDuration(d)
+          }}
+        />
+      )}
     </div>
   )
 }
