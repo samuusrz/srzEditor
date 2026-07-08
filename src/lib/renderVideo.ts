@@ -78,7 +78,7 @@ function drawTextOverlay(
         if (!seg.content) { cx += seg.w; continue }
         ctx.font        = `${t.bold ? '700' : '500'} ${scaledFontSize}px "TikTok Sans", Arial, sans-serif`
         ctx.strokeStyle = '#000000'
-        ctx.lineWidth   = Math.max(2, scaledFontSize * 0.06)
+        ctx.lineWidth   = Math.max(2, scaledFontSize * 0.12)
         ctx.lineJoin    = 'round'
         ctx.miterLimit  = 2
         ctx.strokeText(seg.content, cx, cy)

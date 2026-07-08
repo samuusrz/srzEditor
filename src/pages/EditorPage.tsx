@@ -39,6 +39,7 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
   } = useEditor(initialEditorState)
 
   const [previewUntil, setPreviewUntil] = useState<number | null>(null)
+  const previewElRef = useRef<HTMLDivElement | null>(null)
 
   const handlePreviewClip = useCallback((clip: Clip) => {
     setPlayhead(clip.startAt)
@@ -142,6 +143,7 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
         }
       }
       if (e.key === ' ') { e.preventDefault(); setPlaying(!playing) }
+      if (e.key === 'f' || e.key === 'F') { e.preventDefault(); previewElRef.current?.requestFullscreen?.() }
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') { e.preventDefault(); undo() }
       if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) { e.preventDefault(); redo() }
     }
@@ -156,7 +158,7 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
       startAt: Math.max(0, playhead),
       duration: Math.max(3, totalDuration > 0 ? totalDuration : 3),
       x: 50, y: 15, track: 0,
-      fontSize: 80,
+      fontSize: 72,
       color: '#ffffff',
       bold: true,
     })
@@ -222,6 +224,7 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
           onSetPlayhead={setPlayhead} onSetPlaying={setPlaying}
           onUpdateText={updateText} onDragTextPos={dragTextPos}
           onSelect={select} onSnapshot={snapshot} onClearPreview={handleClearPreview}
+          previewElRef={previewElRef}
         />
         <PropertiesPanel
           selected={selected} clips={clips} texts={texts} audio={audio} totalDuration={totalDuration}

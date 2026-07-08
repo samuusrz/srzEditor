@@ -22,6 +22,7 @@ interface Props {
   onSelect: (item: SelectedItem) => void
   onSnapshot: () => void
   onClearPreview: () => void
+  previewElRef?: React.RefObject<HTMLDivElement | null>
 }
 
 function fmt(t: number) {
@@ -42,6 +43,7 @@ const SNAP = 2.5
 export function PreviewPanel({
   clips, texts, audio, playhead, playing, totalDuration, selected, previewUntil,
   onSetPlayhead, onSetPlaying, onUpdateText, onDragTextPos, onSelect, onSnapshot, onClearPreview,
+  previewElRef,
 }: Props) {
   const videoRef        = useRef<HTMLVideoElement>(null)
   const audioRef        = useRef<HTMLAudioElement>(null)
@@ -227,7 +229,7 @@ export function PreviewPanel({
 
       {/* 9:16 preview */}
       <div
-        ref={previewRef}
+        ref={el => { (previewRef as React.MutableRefObject<HTMLDivElement | null>).current = el; if (previewElRef) (previewElRef as React.MutableRefObject<HTMLDivElement | null>).current = el }}
         className="relative bg-black rounded-xl overflow-hidden border border-zinc-800 shadow-2xl flex-shrink"
         style={{ aspectRatio: '9/16', maxHeight: 'calc(100% - 56px)', minWidth: 0 }}
         onClick={() => onSelect(null)}
@@ -277,7 +279,7 @@ export function PreviewPanel({
                               color: t.color,
                               fontWeight: t.bold ? 700 : 500,
                               fontFamily: "'TikTok Sans', sans-serif",
-                              WebkitTextStroke: `${Math.max(1, displayFs * 0.06)}px #000`,
+                              WebkitTextStroke: `${Math.max(1, displayFs * 0.12)}px #000`,
                               paintOrder: 'stroke fill',
                               whiteSpace: 'pre',
                             }}
