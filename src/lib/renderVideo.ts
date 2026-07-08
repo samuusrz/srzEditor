@@ -389,8 +389,42 @@ export async function renderVideoInBrowser(
   audio:  AudioTrack | null,
   onProgress: (p: RenderProgress) => void,
 ): Promise<Blob> {
+  const totalDuration = clips.reduce((m, c) => Math.max(m, c.startAt + c.duration), 0)
+
   const webm = await captureToWebm(clips, texts, onProgress)
 
+  // ── Electron branch: use native FFmpeg binary ──────────────────────────────
+  if ((window as any).electronAPI) {
+    onProgress({ step: 'Preparando audio…', pct: 87 })
+    const webmBuf = await webm.arrayBuffer()
+    let audioBuf: ArrayBuffer | null = null
+    if (audio) {
+      const r = await fetch(audio.localUrl)
+      audioBuf = await r.arrayBuffer()
+    }
+    ;(window as any).electronAPI.onExportProgress(
+      ({ step, pct }: { step: string; pct: number }) => onProgress({ step, pct })
+    )
+    try {
+      const result = await (window as any).electronAPI.exportVideo({
+        webm: webmBuf,
+        audio: audioBuf,
+        audioStartAt: audio?.startAt ?? 0,
+        audioTrimStart: audio?.trimStart ?? 0,
+        audioFadeIn: audio?.fadeIn ?? 0,
+        audioFadeOut: audio?.fadeOut ?? 0,
+        audioDuration: audio?.duration ?? 0,
+        totalDuration,
+      })
+      if (result?.cancelled) throw new Error('Exportación cancelada')
+      onProgress({ step: '¡Listo!', pct: 100 })
+      return new Blob([], { type: 'video/x-electron-saved' })
+    } finally {
+      ;(window as any).electronAPI.offExportProgress()
+    }
+  }
+
+  // ── Browser/WASM branch ────────────────────────────────────────────────────
   onProgress({ step: 'Cargando FFmpeg…', pct: 87 })
   const ffmpeg = await buildFFmpeg()
 

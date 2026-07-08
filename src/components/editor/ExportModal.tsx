@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { X, Download, AlertCircle, Clock } from 'lucide-react'
+import { X, Download, AlertCircle, Clock, CheckCircle } from 'lucide-react'
 import { renderVideoInBrowser } from '../../lib/renderVideo'
 import type { Clip, TextOverlay, AudioTrack } from '../../types/editor'
 
@@ -19,12 +19,14 @@ function fmtSecs(s: number) {
 }
 
 // Rough estimate: phase1 = realtime clip duration, phase2 = 12× that for slow preset in WASM
-function estimateSeconds(clips: Clip[]) {
+function estimateSeconds(clips: Clip[], isElectron: boolean) {
   const dur = clips.reduce((m, c) => Math.max(m, c.startAt + c.duration), 0)
+  if (isElectron) return Math.round(dur + 15) // native FFmpeg is much faster
   return Math.round(dur + dur * 12 + 35) // +35s for FFmpeg load
 }
 
 export function ExportModal({ clips, texts, audio, onClose }: Props) {
+  const isElectron = typeof (window as any).electronAPI !== 'undefined'
   const [status, setStatus]     = useState<Status>('idle')
   const [progress, setProgress] = useState('')
   const [pct, setPct]           = useState(0)
@@ -46,7 +48,7 @@ export function ExportModal({ clips, texts, audio, onClose }: Props) {
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [status])
 
-  const estimated = estimateSeconds(clips)
+  const estimated = estimateSeconds(clips, isElectron)
   const remaining = Math.max(0, estimated - elapsed)
 
   const handleExport = async () => {
@@ -59,8 +61,12 @@ export function ExportModal({ clips, texts, audio, onClose }: Props) {
         clips, texts, audio,
         ({ step, pct }) => { setProgress(step); setPct(pct) },
       )
-      setVideoUrl(URL.createObjectURL(blob))
-      setStatus('done')
+      if (blob.type === 'video/x-electron-saved') {
+        setStatus('done')
+      } else {
+        setVideoUrl(URL.createObjectURL(blob))
+        setStatus('done')
+      }
     } catch (e: any) {
       const msg = e instanceof Error ? e.message : (typeof e === 'string' ? e : JSON.stringify(e))
       setError(msg || 'Error desconocido')
@@ -155,7 +161,14 @@ export function ExportModal({ clips, texts, audio, onClose }: Props) {
           )}
 
           {/* Preview */}
-          {status === 'done' && videoUrl && (
+          {status === 'done' && isElectron && (
+            <div className="flex flex-col items-center gap-3 py-4">
+              <CheckCircle size={48} className="text-green-400" />
+              <p className="text-base font-medium text-zinc-100">Vídeo guardado en tu ordenador</p>
+              <p className="text-xs text-zinc-600">Exportado en {fmtSecs(totalTime)}</p>
+            </div>
+          )}
+          {status === 'done' && !isElectron && videoUrl && (
             <div className="flex flex-col gap-2">
               <div className="rounded-xl overflow-hidden bg-black">
                 <video src={videoUrl} controls className="w-full max-h-64 object-contain" />
@@ -183,7 +196,7 @@ export function ExportModal({ clips, texts, audio, onClose }: Props) {
                 Renderizar
               </button>
             )}
-            {status === 'done' && (
+            {status === 'done' && !isElectron && videoUrl && (
               <button
                 onClick={handleDownload}
                 className="flex items-center gap-2 px-5 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium rounded-xl transition-colors cursor-pointer"
