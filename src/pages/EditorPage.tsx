@@ -151,19 +151,6 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
     return () => window.removeEventListener('keydown', onKey)
   }, [selected, playing, clips, texts, playhead, clipboard, undo, redo, addClip, addText, removeClip, removeText, splitText, removeAudio, removeMulti, setPlaying, splitClip])
 
-  const handleAddText = () => {
-    addText({
-      id: crypto.randomUUID(),
-      content: 'Texto',
-      startAt: Math.max(0, playhead),
-      duration: Math.max(3, totalDuration > 0 ? totalDuration : 3),
-      x: 50, y: 15, track: 0,
-      fontSize: 72,
-      color: '#ffffff',
-      bold: true,
-    })
-  }
-
   return (
     <div className="h-screen flex flex-col bg-zinc-950 overflow-hidden">
       {/* Top bar */}
@@ -214,7 +201,7 @@ export function EditorPage({ onBack, projectId, initialEditorState }: Props) {
         <MediaPanel
           clips={clips} texts={texts} audio={audio} totalDuration={totalDuration}
           onAddClip={addClip} onRemoveClip={removeClip}
-          onAddText={handleAddText}
+          onAddText={addText} onRemoveText={removeText}
           onSetAudio={setAudio} onRemoveAudio={removeAudio}
           onPreviewClip={handlePreviewClip}
         />

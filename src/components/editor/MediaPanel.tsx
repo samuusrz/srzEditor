@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect } from 'react'
-import { Plus, Film, Type, Music, Trash2, Upload, Library, Folder, Loader2 } from 'lucide-react'
+import { Plus, Film, Type, Music, Trash2, Upload, Library, Folder, FolderOpen, ChevronRight, ChevronDown, Loader2, Check } from 'lucide-react'
 import type { Clip, TextOverlay, AudioTrack } from '../../types/editor'
 import {
   getSongLibrary, createSongItem, deleteSongItem, getPublicUrl,
@@ -7,8 +7,10 @@ import {
 } from '../../lib/db'
 import type { SongLibraryItem, TextLibraryItem } from '../../types'
 import { getDropPoint } from '../../lib/dropStorage'
+import { getAllSongCovers } from '../../lib/songCovers'
+import { getSongFolders, type SongFolder } from '../../lib/songFolders'
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// ── helpers ───────────────────────────────────────────────────────────────────
 
 async function getVideoMeta(file: File): Promise<{ duration: number; thumbnail: string; localUrl: string }> {
   const localUrl = URL.createObjectURL(file)
@@ -42,6 +44,31 @@ async function fetchAudioFile(url: string, name: string): Promise<{ file: File; 
   return getAudioDuration(file).then(({ duration, localUrl }) => ({ file, duration, localUrl }))
 }
 
+// ── text template helpers ─────────────────────────────────────────────────────
+
+interface TextTemplate {
+  id: string
+  name: string
+  content: string
+  x: number
+  y: number
+  fontSize: number
+  color: string
+  bold: boolean
+}
+
+function parseTemplate(item: TextLibraryItem): TextTemplate | null {
+  try {
+    const p = JSON.parse(item.content)
+    if (p.__t === 1) return { id: item.id, name: p.name, content: p.content, x: p.x, y: p.y, fontSize: p.fontSize, color: p.color, bold: p.bold }
+  } catch {}
+  return null
+}
+
+function encodeTemplate(name: string, t: TextOverlay): string {
+  return JSON.stringify({ __t: 1, name, content: t.content, x: t.x, y: t.y, fontSize: t.fontSize, color: t.color, bold: t.bold })
+}
+
 // ── types ─────────────────────────────────────────────────────────────────────
 
 type Tab    = 'media' | 'text' | 'audio'
@@ -55,6 +82,7 @@ interface Props {
   onAddClip: (clip: Clip) => void
   onRemoveClip: (id: string) => void
   onAddText: (text: TextOverlay) => void
+  onRemoveText: (id: string) => void
   onSetAudio: (audio: AudioTrack) => void
   onRemoveAudio: () => void
   onPreviewClip: (clip: Clip) => void
@@ -64,7 +92,7 @@ interface Props {
 
 export function MediaPanel({
   clips, texts, audio, totalDuration,
-  onAddClip, onRemoveClip, onAddText, onSetAudio, onRemoveAudio, onPreviewClip,
+  onAddClip, onRemoveClip, onAddText, onRemoveText, onSetAudio, onRemoveAudio, onPreviewClip,
 }: Props) {
   const [tab,    setTab]    = useState<Tab>('media')
   const [subTab, setSubTab] = useState<SubTab>('library')
@@ -74,7 +102,6 @@ export function MediaPanel({
   const audioInputRef = useRef<HTMLInputElement>(null)
   const songInputRef  = useRef<HTMLInputElement>(null)
 
-  // ── media import ──────────────────────────────────────────────────────────
   const importClips = async (files: FileList | null) => {
     if (!files) return
     for (const file of Array.from(files)) {
@@ -97,14 +124,6 @@ export function MediaPanel({
       id: crypto.randomUUID(), file, localUrl,
       name: file.name.replace(/\.[^.]+$/, ''),
       startAt: 0, trimStart: 0, duration, originalDuration: duration, volume: 1, fadeIn: 0, fadeOut: 0, keyframes: [],
-    })
-  }
-
-  const addText = () => {
-    onAddText({
-      id: crypto.randomUUID(), content: 'Texto',
-      startAt: 0, duration: Math.max(3, totalDuration),
-      x: 50, y: 15, fontSize: 21, color: '#ffffff', bold: true, track: 0,
     })
   }
 
@@ -170,8 +189,8 @@ export function MediaPanel({
         <div className="flex-1 flex flex-col min-h-0">
           <SubTabBar value={subTab} onChange={setSubTab} />
           {subTab === 'library'
-            ? <TextLibraryPane onAddText={onAddText} totalDuration={totalDuration} />
-            : <TextLocalPane texts={texts} onAddText={addText} />
+            ? <TextLibraryPane texts={texts} totalDuration={totalDuration} onAddText={onAddText} onRemoveText={onRemoveText} />
+            : <TextLocalPane texts={texts} totalDuration={totalDuration} onAddText={onAddText} />
           }
         </div>
       )}
@@ -196,7 +215,7 @@ export function MediaPanel({
 function SubTabBar({ value, onChange }: { value: SubTab; onChange: (v: SubTab) => void }) {
   return (
     <div className="flex border-b border-zinc-800 flex-none">
-      {([['library', <Library size={11} />, 'Biblioteca'], ['local', <Folder size={11} />, 'Local']] as const).map(([id, icon, label]) => (
+      {([['library', <Library size={11} />, 'Biblioteca'], ['local', <Plus size={11} />, 'Local']] as const).map(([id, icon, label]) => (
         <button key={id} onClick={() => onChange(id)}
           className={`flex-1 flex items-center justify-center gap-1 py-1.5 text-[10px] transition-colors cursor-pointer ${
             value === id ? 'text-violet-400 border-b-2 border-violet-500' : 'text-zinc-500 hover:text-zinc-300'
@@ -211,80 +230,187 @@ function SubTabBar({ value, onChange }: { value: SubTab; onChange: (v: SubTab) =
 
 // ── Text Library Pane ─────────────────────────────────────────────────────────
 
-function TextLibraryPane({ onAddText, totalDuration }: { onAddText: (t: TextOverlay) => void; totalDuration: number }) {
-  const [items, setItems]   = useState<TextLibraryItem[]>([])
-  const [newText, setNewText] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [saving, setSaving]   = useState(false)
+function TextLibraryPane({ texts, totalDuration, onAddText, onRemoveText }: {
+  texts: TextOverlay[]
+  totalDuration: number
+  onAddText: (t: TextOverlay) => void
+  onRemoveText: (id: string) => void
+}) {
+  const [templates, setTemplates] = useState<TextTemplate[]>([])
+  const [loading, setLoading]     = useState(false)
+  const [saving, setSaving]       = useState(false)
+  const [pendingId, setPendingId] = useState<string | null>(null)
+  const [moleName, setMoleName]   = useState('')
 
-  useEffect(() => {
+  const loadTemplates = () => {
     setLoading(true)
-    getTextLibrary().then(setItems).catch(console.error).finally(() => setLoading(false))
-  }, [])
+    getTextLibrary()
+      .then(items => setTemplates(items.map(parseTemplate).filter(Boolean) as TextTemplate[]))
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }
 
-  const save = async () => {
-    if (!newText.trim()) return
+  useEffect(() => { loadTemplates() }, [])
+
+  const handleAddText = () => {
+    const id = crypto.randomUUID()
+    onAddText({
+      id, content: 'Texto',
+      startAt: 0, duration: Math.max(3, totalDuration),
+      x: 50, y: 15, fontSize: 72, color: '#ffffff', bold: true, track: 0,
+    })
+    setPendingId(id)
+    setMoleName('')
+  }
+
+  const handleSave = async () => {
+    if (!pendingId || !moleName.trim()) return
+    const text = texts.find(t => t.id === pendingId)
+    if (!text) { setPendingId(null); return }
     setSaving(true)
     try {
-      const item = await createTextItem(newText.trim())
-      setItems(prev => [item, ...prev])
-      setNewText('')
+      await createTextItem(encodeTemplate(moleName.trim(), text))
+      onRemoveText(pendingId)
+      setPendingId(null)
+      setMoleName('')
+      loadTemplates()
     } catch (e) { console.error(e) }
     setSaving(false)
   }
 
-  const remove = async (item: TextLibraryItem) => {
-    await deleteTextItem(item.id).catch(console.error)
-    setItems(prev => prev.filter(i => i.id !== item.id))
+  const handleDiscard = () => {
+    if (pendingId) onRemoveText(pendingId)
+    setPendingId(null)
+    setMoleName('')
   }
 
-  const use = (item: TextLibraryItem) => {
+  const useTemplate = (tmpl: TextTemplate) => {
     onAddText({
-      id: crypto.randomUUID(), content: item.content,
-      startAt: 0, duration: Math.max(3, totalDuration),
-      x: 50, y: 15, fontSize: 21, color: '#ffffff', bold: true, track: 0,
+      id: crypto.randomUUID(),
+      content: tmpl.content,
+      x: tmpl.x, y: tmpl.y,
+      fontSize: tmpl.fontSize,
+      color: tmpl.color,
+      bold: tmpl.bold,
+      startAt: 0,
+      duration: Math.max(3, totalDuration),
+      track: 0,
     })
+  }
+
+  const removeTemplate = async (tmpl: TextTemplate) => {
+    await deleteTextItem(tmpl.id).catch(console.error)
+    setTemplates(prev => prev.filter(t => t.id !== tmpl.id))
+  }
+
+  // Template editing mode
+  if (pendingId) {
+    const currentText = texts.find(t => t.id === pendingId)
+    return (
+      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3">
+        <div className="bg-violet-900/20 border border-violet-700/40 rounded-xl p-3">
+          <p className="text-xs font-semibold text-violet-300 mb-1">Editando molde</p>
+          <p className="text-[10px] text-zinc-400 leading-relaxed">Edita el texto en el previsualizador — posición, tamaño, color y contenido. Cuando esté listo, ponle un nombre y guárdalo.</p>
+        </div>
+
+        {currentText && (
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-[10px] text-zinc-500 space-y-0.5">
+            <div className="flex justify-between"><span>Contenido</span><span className="text-zinc-300 truncate max-w-[120px]">{currentText.content}</span></div>
+            <div className="flex justify-between"><span>Posición</span><span className="text-zinc-300">{currentText.x.toFixed(0)}% · {currentText.y.toFixed(0)}%</span></div>
+            <div className="flex justify-between"><span>Tamaño</span><span className="text-zinc-300">{currentText.fontSize}px</span></div>
+            <div className="flex justify-between"><span>Color</span><span className="text-zinc-300 flex items-center gap-1"><span className="w-3 h-3 rounded-full inline-block" style={{ background: currentText.color }} />{currentText.color}</span></div>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[10px] text-zinc-500 uppercase tracking-wide">Nombre del molde</label>
+          <input
+            value={moleName} onChange={e => setMoleName(e.target.value)}
+            placeholder="ej: Título grande blanco..."
+            className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-violet-500"
+            onKeyDown={e => { if (e.key === 'Enter') handleSave() }}
+            autoFocus
+          />
+        </div>
+
+        <button
+          onClick={handleSave}
+          disabled={saving || !moleName.trim()}
+          className="w-full flex items-center justify-center gap-1.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white text-xs font-medium rounded-xl py-2 cursor-pointer transition-colors"
+        >
+          {saving ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+          Guardar en biblioteca
+        </button>
+        <button
+          onClick={handleDiscard}
+          className="w-full text-xs text-zinc-500 hover:text-zinc-300 py-1 cursor-pointer transition-colors"
+        >
+          Descartar
+        </button>
+      </div>
+    )
   }
 
   return (
     <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-2">
-      {/* Add to library */}
-      <div className="flex flex-col gap-1">
-        <textarea
-          value={newText} onChange={e => setNewText(e.target.value)}
-          placeholder="Nuevo texto..."
-          className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-zinc-100 resize-none focus:outline-none focus:border-violet-500"
-          rows={2}
-        />
-        <button onClick={save} disabled={saving || !newText.trim()}
-          className="w-full flex items-center gap-1 justify-center bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white rounded-lg py-1.5 text-xs cursor-pointer transition-colors">
-          {saving ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
-          Guardar en biblioteca
-        </button>
-      </div>
+      <button
+        onClick={handleAddText}
+        className="w-full flex items-center gap-2 justify-center bg-violet-600 hover:bg-violet-700 text-white rounded-xl py-2.5 text-sm font-medium transition-colors cursor-pointer"
+      >
+        <Plus size={14} />Añadir texto
+      </button>
 
-      {loading && <p className="text-xs text-zinc-600 text-center">Cargando...</p>}
-      {items.map(item => (
-        <div key={item.id} className="group bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 flex items-start gap-1">
-          <button onClick={() => use(item)} className="flex-1 text-left text-xs text-zinc-300 truncate cursor-pointer hover:text-white transition-colors">
-            {item.content}
-          </button>
-          <button onClick={() => remove(item)} className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 transition-all cursor-pointer flex-none">
-            <Trash2 size={10} />
-          </button>
+      {loading && <p className="text-xs text-zinc-600 text-center mt-2">Cargando...</p>}
+
+      {templates.length > 0 && (
+        <div className="flex flex-col gap-1 mt-1">
+          <p className="text-[10px] text-zinc-600 uppercase tracking-wider px-1">Moldes guardados</p>
+          {templates.map(tmpl => (
+            <div key={tmpl.id} className="group flex items-center gap-2 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-lg px-2 py-2 transition-colors">
+              {/* Color swatch */}
+              <div className="w-5 h-5 rounded flex-none flex items-center justify-center" style={{ background: tmpl.color + '22', border: `1.5px solid ${tmpl.color}44` }}>
+                <Type size={10} style={{ color: tmpl.color }} />
+              </div>
+              <button
+                onClick={() => useTemplate(tmpl)}
+                className="flex-1 text-left min-w-0 cursor-pointer"
+              >
+                <p className="text-xs text-zinc-200 truncate">{tmpl.name}</p>
+                <p className="text-[9px] text-zinc-500 truncate">{tmpl.content} · {tmpl.fontSize}px</p>
+              </button>
+              <button onClick={() => removeTemplate(tmpl)} className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 transition-all cursor-pointer flex-none">
+                <Trash2 size={10} />
+              </button>
+            </div>
+          ))}
         </div>
-      ))}
-      {!loading && items.length === 0 && <p className="text-xs text-zinc-600 text-center mt-2">Biblioteca vacía</p>}
+      )}
+
+      {!loading && templates.length === 0 && (
+        <p className="text-xs text-zinc-600 text-center mt-2 px-2">Crea un texto, edítalo como quieras y guárdalo como molde.</p>
+      )}
     </div>
   )
 }
 
 // ── Text Local Pane ───────────────────────────────────────────────────────────
 
-function TextLocalPane({ texts, onAddText }: { texts: TextOverlay[]; onAddText: () => void }) {
+function TextLocalPane({ texts, totalDuration, onAddText }: {
+  texts: TextOverlay[]
+  totalDuration: number
+  onAddText: (t: TextOverlay) => void
+}) {
+  const addText = () => {
+    onAddText({
+      id: crypto.randomUUID(), content: 'Texto',
+      startAt: 0, duration: Math.max(3, totalDuration),
+      x: 50, y: 15, fontSize: 72, color: '#ffffff', bold: true, track: 0,
+    })
+  }
+
   return (
     <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-2">
-      <button onClick={onAddText}
+      <button onClick={addText}
         className="w-full flex items-center gap-2 justify-center bg-violet-600 hover:bg-violet-700 text-white rounded-xl py-2.5 text-sm font-medium transition-colors cursor-pointer">
         <Plus size={14} />Añadir texto
       </button>
@@ -318,18 +444,23 @@ function AudioLibraryPane({ onSetAudio, clips, onPreviewClip }: {
   clips: Clip[]
   onPreviewClip: (clip: Clip) => void
 }) {
-  const [songs, setSongs]   = useState<SongLibraryItem[]>([])
-  const [loading, setLoading] = useState(false)
+  const [songs, setSongs]         = useState<SongLibraryItem[]>([])
+  const [loading, setLoading]     = useState(false)
   const [uploading, setUploading] = useState(false)
   const [newName, setNewName]     = useState('')
-  const fileRef = useRef<HTMLInputElement>(null)
-  const [pendingFile, setPendingFile] = useState<File | null>(null)
+  const fileRef                   = useRef<HTMLInputElement>(null)
+  const [pendingFile, setPendingFile]       = useState<File | null>(null)
   const [pendingDropSong, setPendingDropSong] = useState<PendingDropSong | null>(null)
-  const [selectedClip, setSelectedClip] = useState<Clip | null>(null)
+  const [selectedClip, setSelectedClip]     = useState<Clip | null>(null)
+  const [covers, setCovers]                 = useState<Record<string, string>>({})
+  const [folders, setFolders]               = useState<SongFolder[]>([])
+  const [collapsed, setCollapsed]           = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     setLoading(true)
     getSongLibrary().then(setSongs).catch(console.error).finally(() => setLoading(false))
+    setCovers(getAllSongCovers())
+    setFolders(getSongFolders())
   }, [])
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -378,19 +509,16 @@ function AudioLibraryPane({ onSetAudio, clips, onPreviewClip }: {
   const applyWithClip = (clip: Clip) => {
     if (!pendingDropSong) return
     const { dropAt, file, localUrl, duration, song } = pendingDropSong
-    const clipStart = clip.startAt
-    const trimStart = Math.max(0, dropAt - clipStart)
-    const audioStartAt = Math.max(0, clipStart - dropAt)
-    const dur = duration - trimStart
+    const trimStart = Math.max(0, dropAt - clip.startAt)
+    const audioStartAt = Math.max(0, clip.startAt - dropAt)
     onSetAudio({
-      id: crypto.randomUUID(),
-      file, localUrl, name: song.name,
+      id: crypto.randomUUID(), file, localUrl, name: song.name,
       startAt: audioStartAt, trimStart,
-      duration: Math.max(0.1, dur), originalDuration: duration,
+      duration: Math.max(0.1, duration - trimStart),
+      originalDuration: duration,
       volume: 1, fadeIn: 0, fadeOut: 0, keyframes: [],
     })
-    setPendingDropSong(null)
-    setSelectedClip(null)
+    setPendingDropSong(null); setSelectedClip(null)
   }
 
   const applyWithoutSync = () => {
@@ -401,40 +529,54 @@ function AudioLibraryPane({ onSetAudio, clips, onPreviewClip }: {
       startAt: 0, trimStart: 0, duration, originalDuration: duration,
       volume: 1, fadeIn: 0, fadeOut: 0, keyframes: [],
     })
-    setPendingDropSong(null)
-    setSelectedClip(null)
+    setPendingDropSong(null); setSelectedClip(null)
   }
 
   const handleSelectClip = (clip: Clip) => {
-    setSelectedClip(clip)
-    onPreviewClip(clip)
+    setSelectedClip(clip); onPreviewClip(clip)
   }
 
-  // Clips sorted by startAt (timeline order)
+  const toggleSection = (key: string) => setCollapsed(prev => ({ ...prev, [key]: !prev[key] }))
+
   const sortedClips = [...clips].sort((a, b) => a.startAt - b.startAt)
+
+  // Group songs by folder
+  const assignedIds = new Set(folders.flatMap(f => f.songIds))
+  const unassigned  = songs.filter(s => !assignedIds.has(s.id))
+
+  const SongItem = ({ song }: { song: SongLibraryItem }) => (
+    <div className="group flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5">
+      {/* Cover */}
+      <div className="w-8 h-8 rounded-md overflow-hidden bg-zinc-800 flex items-center justify-center flex-none">
+        {covers[song.id]
+          ? <img src={covers[song.id]} className="w-full h-full object-cover" alt="" />
+          : <Music size={12} className="text-zinc-600" />
+        }
+      </div>
+      <button onClick={() => useSong(song)} className="flex-1 text-left cursor-pointer hover:text-white transition-colors min-w-0">
+        <p className="text-xs text-zinc-300 truncate">{song.name}</p>
+        {song.duration && <p className="text-[10px] text-zinc-500">{song.duration.toFixed(1)}s</p>}
+      </button>
+      <button onClick={() => removeSong(song)} className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 transition-all cursor-pointer flex-none">
+        <Trash2 size={10} />
+      </button>
+    </div>
+  )
 
   return (
     <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-2 relative">
       <input ref={fileRef} type="file" accept="audio/*" className="hidden" onChange={handleFileSelect} />
 
-      {/* Upload UI */}
       {pendingFile ? (
         <div className="flex flex-col gap-1">
-          <input
-            value={newName} onChange={e => setNewName(e.target.value)}
-            placeholder="Nombre de la canción"
-            className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-violet-500"
-          />
+          <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Nombre de la canción"
+            className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-violet-500" />
           <div className="flex gap-1">
             <button onClick={uploadSong} disabled={uploading || !newName.trim()}
               className="flex-1 flex items-center justify-center gap-1 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white rounded-lg py-1.5 text-xs cursor-pointer transition-colors">
-              {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
-              Subir
+              {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}Subir
             </button>
-            <button onClick={() => { setPendingFile(null); setNewName('') }}
-              className="px-2 text-zinc-500 hover:text-zinc-300 text-xs cursor-pointer">
-              Cancelar
-            </button>
+            <button onClick={() => { setPendingFile(null); setNewName('') }} className="px-2 text-zinc-500 hover:text-zinc-300 text-xs cursor-pointer">Cancelar</button>
           </div>
         </div>
       ) : (
@@ -445,66 +587,79 @@ function AudioLibraryPane({ onSetAudio, clips, onPreviewClip }: {
       )}
 
       {loading && <p className="text-xs text-zinc-600 text-center">Cargando...</p>}
-      {songs.map(song => (
-        <div key={song.id} className="group bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 flex items-center gap-1">
-          <button onClick={() => useSong(song)} className="flex-1 text-left cursor-pointer hover:text-white transition-colors min-w-0">
-            <p className="text-xs text-zinc-300 truncate">{song.name}</p>
-            {song.duration && <p className="text-[10px] text-zinc-500">{song.duration.toFixed(1)}s</p>}
-          </button>
-          <button onClick={() => removeSong(song)} className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 transition-all cursor-pointer flex-none">
-            <Trash2 size={10} />
-          </button>
+
+      {/* Folders */}
+      {folders.map(folder => {
+        const folderSongs = songs.filter(s => folder.songIds.includes(s.id))
+        if (folderSongs.length === 0) return null
+        const isCollapsed = collapsed[folder.id]
+        return (
+          <div key={folder.id}>
+            <button
+              onClick={() => toggleSection(folder.id)}
+              className="flex items-center gap-1.5 text-[11px] text-zinc-500 hover:text-zinc-300 cursor-pointer mb-1 w-full text-left"
+            >
+              {isCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+              {isCollapsed ? <Folder size={11} className="text-amber-400" /> : <FolderOpen size={11} className="text-amber-400" />}
+              {folder.name}
+              <span className="text-zinc-700 ml-0.5">({folderSongs.length})</span>
+            </button>
+            {!isCollapsed && (
+              <div className="flex flex-col gap-1 pl-3 border-l border-zinc-800">
+                {folderSongs.map(song => <SongItem key={song.id} song={song} />)}
+              </div>
+            )}
+          </div>
+        )
+      })}
+
+      {/* Unassigned */}
+      {unassigned.length > 0 && (
+        <div className="flex flex-col gap-1">
+          {folders.some(f => songs.some(s => f.songIds.includes(s.id))) && (
+            <p className="text-[10px] text-zinc-600 uppercase tracking-wide">Sin carpeta</p>
+          )}
+          {unassigned.map(song => <SongItem key={song.id} song={song} />)}
         </div>
-      ))}
+      )}
+
       {!loading && songs.length === 0 && <p className="text-xs text-zinc-600 text-center mt-2">Biblioteca vacía</p>}
 
-      {/* Clip selector modal for drop sync */}
+      {/* Drop sync modal */}
       {pendingDropSong && (
         <div className="absolute inset-0 bg-zinc-950 z-10 flex flex-col overflow-hidden">
-          {/* Header */}
           <div className="px-3 pt-3 pb-2 border-b border-zinc-800 flex-none">
             <p className="text-xs font-semibold text-zinc-100">¿Cuál es el clip showcase?</p>
             <p className="text-[10px] text-zinc-500 mt-0.5">El Drop se sincroniza al inicio del clip seleccionado.</p>
           </div>
 
-          {/* Confirm / Back bar (shown when a clip is selected) */}
-          {selectedClip ? (
+          {selectedClip && (
             <div className="flex gap-2 px-3 py-2 border-b border-zinc-800 flex-none">
-              <button
-                onClick={() => applyWithClip(selectedClip)}
-                className="flex-1 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium rounded-lg cursor-pointer transition-colors"
-              >
+              <button onClick={() => applyWithClip(selectedClip)}
+                className="flex-1 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium rounded-lg cursor-pointer transition-colors">
                 Confirmar
               </button>
-              <button
-                onClick={() => setSelectedClip(null)}
-                className="flex-1 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs rounded-lg cursor-pointer transition-colors"
-              >
+              <button onClick={() => setSelectedClip(null)}
+                className="flex-1 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs rounded-lg cursor-pointer transition-colors">
                 Volver
               </button>
             </div>
-          ) : null}
+          )}
 
-          {/* Clip grid */}
           <div className="flex-1 overflow-y-auto p-2">
             <div className="grid grid-cols-2 gap-2">
               {sortedClips.map(clip => {
                 const isSel = selectedClip?.id === clip.id
                 return (
-                  <button
-                    key={clip.id}
-                    onClick={() => handleSelectClip(clip)}
-                    className={`relative rounded-xl overflow-hidden border-2 transition-all cursor-pointer text-left ${
-                      isSel ? 'border-violet-500 ring-2 ring-violet-500/40' : 'border-zinc-800 hover:border-zinc-600'
-                    }`}
-                  >
+                  <button key={clip.id} onClick={() => handleSelectClip(clip)}
+                    className={`relative rounded-xl overflow-hidden border-2 transition-all cursor-pointer text-left ${isSel ? 'border-violet-500 ring-2 ring-violet-500/40' : 'border-zinc-800 hover:border-zinc-600'}`}>
                     {clip.thumbnail
                       ? <img src={clip.thumbnail} className="w-full aspect-[9/16] object-cover" alt="" />
                       : <div className="w-full aspect-[9/16] bg-zinc-800 flex items-center justify-center"><Film size={18} className="text-zinc-600" /></div>
                     }
                     {isSel && (
                       <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-violet-600 rounded-full flex items-center justify-center">
-                        <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                        <Check size={10} className="text-white" />
                       </div>
                     )}
                     <div className="p-1.5">
@@ -517,18 +672,13 @@ function AudioLibraryPane({ onSetAudio, clips, onPreviewClip }: {
             </div>
           </div>
 
-          {/* Footer actions */}
           <div className="px-3 pb-3 pt-2 border-t border-zinc-800 flex-none flex flex-col gap-1">
-            <button
-              onClick={applyWithoutSync}
-              className="w-full py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer border border-zinc-800 rounded-lg"
-            >
+            <button onClick={applyWithoutSync}
+              className="w-full py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer border border-zinc-800 rounded-lg">
               Sin showcase
             </button>
-            <button
-              onClick={() => { setPendingDropSong(null); setSelectedClip(null) }}
-              className="w-full py-1 text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors cursor-pointer"
-            >
+            <button onClick={() => { setPendingDropSong(null); setSelectedClip(null) }}
+              className="w-full py-1 text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors cursor-pointer">
               Cancelar
             </button>
           </div>
